@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  /* 定义统一按钮风格 */
+  .unified-button {
+    @apply px-2 py-1 bg-gray-100 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+
+  /* 将统一风格应用到 react-big-calendar 工具栏按钮 */
+  .rbc-toolbar button {
+    /* 直接应用 .unified-button 的功能类，而不是使用 @apply */
+    @apply px-2 py-1 bg-gray-100 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+    /* 保留其他必要的覆盖 */
+    color: inherit; 
+    background-image: none;
+    text-transform: none; 
+    letter-spacing: normal;
+    cursor: pointer;
+  }
+
+  /* 对按钮组（如视图切换）进行微调 */
+  .rbc-btn-group button {
+      /* 移除统一按钮可能带来的独立阴影，并调整边框 */
+      @apply shadow-none border-l-0 first:border-l;
+      /* 确保圆角只在按钮组的两端 */
+      @apply rounded-none first:rounded-l-md last:rounded-r-md;
+  }
+  
+  /* 确保按钮组之间以及和标签之间有间距 */
+  .rbc-toolbar {
+      @apply gap-2;
+  }
+  .rbc-btn-group {
+      @apply flex;
+  }
+  .rbc-toolbar .rbc-toolbar-label {
+       @apply text-xl font-semibold flex-shrink-0; /* 调整日期标签样式并防止其被压缩 */
+       margin-left: auto; /* 将标签推到右侧 (如果需要) */
+       margin-right: auto; /* 居中 */
+  }
+
+  /* 如果需要，覆盖掉默认的 focus 边框，因为 unified-button 已经处理了 focus */
+  .rbc-toolbar button:focus {
+       outline: none;
+       box-shadow: none; /* 移除默认的 focus shadow，依赖 unified-button 的 ring */
+  }
+   /* 特定处理激活状态按钮 */
+  .rbc-toolbar button.rbc-active {
+    @apply bg-gray-300 shadow-inner;
+  }
+
+}
+
+/* --- Minimal CSS Override for react-big-calendar Views --- */
+
+/* Force flex display for the view containers. This is often the key part conflicting with Tailwind */
+.rbc-month-view,
+.rbc-week-view,
+.rbc-day-view,
+.rbc-agenda-view {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 0% !important;
+}
+
+/* Remove all other overrides added previously */
+/* Ensure toolbar styles are primarily handled by react-big-calendar.css */
