@@ -29,6 +29,7 @@ const {
     loadExchangeSettings, saveExchangeSettings,
     loadImapSettings, saveImapSettings,
     loadCalDAVSettings, saveCalDAVSettings,
+    loadImapFilterSettings, saveImapFilterSettings, // <-- 添加新的导入
     uuidv4
 } = require('./storage');
 // --- 导入新的 EAS 同步函数 ---
@@ -62,6 +63,7 @@ let eventsDb = [];
 let exchangeSettings = {};
 let imapSettings = {};
 let caldavSettings = {};
+let imapFilterSettings = { sender_allowlist: [] }; // <-- 初始化新的内存缓存
 
 async function initializeData() {
     llmSettings = await loadLLMSettings();
@@ -74,11 +76,18 @@ async function initializeData() {
         console.warn("CalDAV设置未找到，将使用默认空设置");
         caldavSettings = {};
     }
+    try { 
+        imapFilterSettings = loadImapFilterSettings(); // <-- 移除 await
+    } catch (error) {
+        console.warn("IMAP Filter设置加载时出错(将使用默认空设置):", error); // 修改日志
+        imapFilterSettings = { sender_allowlist: [] };
+    }
     console.log("初始LLM设置已加载:", llmSettings);
     console.log(`初始事件已加载: ${eventsDb.length}个`);
     console.log("初始Exchange设置已加载 (密码已隐藏):", { ...exchangeSettings, password: '***' });
     console.log("初始IMAP设置已加载 (密码已隐藏):", { ...imapSettings, password: '***' });
     console.log("初始CalDAV设置已加载 (密码已隐藏):", { ...caldavSettings, password: '***' });
+    console.log("初始IMAP Filter设置已加载:", imapFilterSettings); // <-- 添加日志
 }
 
 // --- 中间件 ---
@@ -703,10 +712,6 @@ app.delete('/events/:id', async (req, res) => {
     const eventId = req.params.id;
     console.log(`[DELETE /events/:id] Received request to delete event with ID: ${eventId}`);
 
-    // --- 添加日志记录 ---
-    console.log(`[DELETE /events/:id] Current event IDs in DB at time of request:`, eventsDb.map(e => e.id));
-    // -------------------
-
     const eventIndex = eventsDb.findIndex(e => e.id === eventId);
 
     if (eventIndex === -1) {
@@ -714,23 +719,44 @@ app.delete('/events/:id', async (req, res) => {
         return res.status(404).json({ error: `未找到 ID 为 ${eventId} 的事件。` });
     }
 
-    // 从内存数据库中移除事件
-    const deletedEvent = eventsDb.splice(eventIndex, 1)[0]; // splice 返回被删除元素的数组
-    console.log(`[DELETE /events/:id] Event removed from memory: "${deletedEvent.title}"`);
+    const eventToDelete = { ...eventsDb[eventIndex] }; // 创建副本以防万一
 
-    try {
-        // 保存更新后的事件列表到文件
-        await saveEvents(eventsDb);
-        console.log(`[DELETE /events/:id] Successfully saved events database after deletion.`);
-        console.log(`事件已删除: "${deletedEvent.title}" (ID: ${eventId})`);
-        // 返回 200 OK 并附带消息，或 204 No Content
-        res.status(200).json({ message: `事件 '${deletedEvent.title}' (ID: ${eventId}) 已成功删除。` }); 
-        // res.status(204).send(); // 备选：不返回任何内容体
-    } catch (error) {
-        // 如果保存失败，需要将事件重新加回内存数据库以保持一致性
-        eventsDb.splice(eventIndex, 0, deletedEvent); // 在原位置插回
-        console.error('[DELETE /events/:id] Error saving events database after deletion:', error);
-        res.status(500).json({ error: '删除事件后保存失败。请重试。' });
+    // 检查事件是否源自 CalDAV 并拥有 caldav_url
+    if (eventToDelete.source?.startsWith('caldav_sync') && eventToDelete.caldav_url) {
+        console.log(`[DELETE /events/:id] Marking CalDAV event for server deletion: ${eventId} - ${eventToDelete.title}`);
+        eventsDb[eventIndex] = {
+            ...eventToDelete,
+            needs_caldav_delete: true, // 标记需要在服务器上删除
+            locally_deleted_at: new Date().toISOString() // 标记本地删除时间，用于UI过滤
+        };
+
+        try {
+            await saveEvents(eventsDb);
+            console.log(`[DELETE /events/:id] Event ${eventId} marked for CalDAV deletion and saved locally.`);
+            res.status(200).json({
+                message: `事件 '${eventToDelete.title}' (ID: ${eventId}) 已标记为待从服务器删除。将在下次同步时处理。`,
+                marked_for_server_delete: true
+            });
+        } catch (error) {
+            // 如果保存失败，理论上应该回滚标记，但目前保持简单
+            console.error('[DELETE /events/:id] Error saving events database after marking for CalDAV deletion:', error);
+            res.status(500).json({ error: '标记事件待删除后保存失败。请重试。' });
+        }
+
+    } else {
+        // 非 CalDAV 事件，或没有 caldav_url，直接本地删除
+        const deletedEvent = eventsDb.splice(eventIndex, 1)[0];
+        console.log(`[DELETE /events/:id] Event removed from memory (non-CalDAV or no URL): "${deletedEvent.title}"`);
+
+        try {
+            await saveEvents(eventsDb);
+            console.log(`[DELETE /events/:id] Successfully saved events database after local deletion.`);
+            res.status(200).json({ message: `事件 '${deletedEvent.title}' (ID: ${eventId}) 已成功删除。` });
+        } catch (error) {
+            eventsDb.splice(eventIndex, 0, deletedEvent); // 保存失败，插回原位
+            console.error('[DELETE /events/:id] Error saving events database after local deletion:', error);
+            res.status(500).json({ error: '本地删除事件后保存失败。请重试。' });
+        }
     }
 });
 
@@ -985,14 +1011,12 @@ async function performImapSync() {
     };
     const extractCalendarEvents = async (emails) => {
         const eventsFound = [];
-        const existingEventIds = new Set(eventsDb.map(e => e.id)); // 获取当前 ID 用于去重
         
-        // --- 定义发件人黑名单 (可以考虑后续移到配置中) ---
-        const SENDER_BLOCKLIST = [
-            'notice@workflow-sender.mingdao.net'
-            // 在这里添加其他不想处理的发件人
-        ];
-        // -----------------------------------------------
+        // --- 使用动态加载的白名单 ---
+        const currentAllowlist = (imapFilterSettings && Array.isArray(imapFilterSettings.sender_allowlist))
+                                 ? imapFilterSettings.sender_allowlist
+                                 : [];
+        // ---------------------------
 
         for (const email of emails) {
             // --- ICS 附件处理逻辑 (保持不变) ---
@@ -1051,64 +1075,70 @@ async function performImapSync() {
                 }
             }
             
-            // --- LLM 解析邮件正文逻辑 (添加发件人过滤) ---
+            // --- LLM 解析邮件正文逻辑 (使用动态白名单) ---
             const senderAddress = email.from?.value?.[0]?.address?.toLowerCase();
-            if (senderAddress && SENDER_BLOCKLIST.includes(senderAddress)) {
-                console.log(`[extractCalendarEvents] Skipping LLM parsing for email UID ${email.uid} from blocked sender: ${senderAddress}`);
-                continue; // 跳过这封邮件的 LLM 处理
-            }
 
-            const textToParse = email.text || (email.html ? require('html-to-text').htmlToText(email.html) : '');
-            if (textToParse && textToParse.trim().length > 5) {
-                console.log(`[extractCalendarEvents] Attempting LLM parsing for email UID ${email.uid} body (Sender: ${senderAddress || 'Unknown'})...`);
-                try {
-                    const llmResult = await parseTextWithLLM(textToParse);
-                    if (llmResult && llmResult.start_datetime) {
-                        // ... (LLM 结果处理和增强重复检查逻辑保持不变) ...
-                        const llmEventTitle = llmResult.title || email.subject || '来自邮件的事件';
-                        const llmEventStart = llmResult.start_datetime;
-                        
-                        const llmEventUidBase = `llm_${email.uid}_${new Date(llmEventStart).getTime()}`;
-                        let llmUniqueId = llmEventUidBase;
-                        let counter = 0;
-                        while(eventsDb.some(e => e.id === llmUniqueId)) { 
-                             counter++;
-                             llmUniqueId = `${llmEventUidBase}_${counter}`;
-                        }
-
-                        const isDuplicateLLM = eventsDb.some(existingEvent => 
-                            existingEvent.id === llmUniqueId || 
-                            (existingEvent.title === llmEventTitle && existingEvent.start_datetime === llmEventStart)
-                        );
-
-                        if (!isDuplicateLLM) {
-                            console.log(`[extractCalendarEvents] LLM parsed event from email UID ${email.uid}:`, llmResult);
-                            const eventData = {
-                                id: llmUniqueId,
-                                title: llmEventTitle,
-                                start_datetime: llmEventStart,
-                                end_datetime: llmResult.end_datetime,
-                                description: llmResult.description || email.subject || '',
-                                location: llmResult.location || '',
-                                all_day: false,
-                                source: 'imap_llm_body_parse',
-                                created_at: email.date ? new Date(email.date).toISOString() : new Date().toISOString(),
-                                updated_at: new Date().toISOString(),
-                                caldav_url: attachment.url // <-- 添加这一行
-                            };
-                            eventsFound.push(eventData);
-                        } else {
-                            console.log(`[extractCalendarEvents] Skipping duplicate LLM-parsed event found by enhanced check. Title: ${llmEventTitle}, Start: ${llmEventStart}`);
-                        }
-                    } else if(llmResult) {
-                        console.log(`[extractCalendarEvents] LLM parsed email UID ${email.uid} but no valid start date found.`);
-                    } else {
-                         console.log(`[extractCalendarEvents] LLM parsing failed or returned null for email UID ${email.uid}.`);
-                    }
-                } catch (llmError) {
-                    console.error(`[extractCalendarEvents] Error during LLM parsing for email UID ${email.uid}:`, llmError);
+            if (!senderAddress || !currentAllowlist.includes(senderAddress)) {
+                if (senderAddress) {
+                    console.log(`[extractCalendarEvents] Skipping LLM parsing for email UID ${email.uid} from sender: ${senderAddress} (not in allowlist).`);
                 }
-            }
+            } else {
+                // 发件人在白名单中，继续进行 LLM 解析
+                const textToParse = email.text || (email.html ? require('html-to-text').htmlToText(email.html) : '');
+                if (textToParse && textToParse.trim().length > 5) {
+                    console.log(`[extractCalendarEvents] Attempting LLM parsing for email UID ${email.uid} body (Sender: ${senderAddress} - in allowlist)...`);
+                    try {
+                        const llmResult = await parseTextWithLLM(textToParse);
+                        if (llmResult && llmResult.start_datetime) {
+                            // ... (LLM 结果处理和增强重复检查逻辑保持不变) ...
+                            const llmEventTitle = llmResult.title || email.subject || '来自邮件的事件';
+                            const llmEventStart = llmResult.start_datetime;
+                            
+                            const llmEventUidBase = `llm_${email.uid}_${new Date(llmEventStart).getTime()}`;
+                            let llmUniqueId = llmEventUidBase;
+                            let counter = 0;
+                            while(eventsDb.some(e => e.id === llmUniqueId) || eventsFound.some(ef => ef.id === llmUniqueId)) { 
+                                 counter++;
+                                 llmUniqueId = `${llmEventUidBase}_${counter}`;
+                            }
+
+                            const isDuplicateLLM = eventsDb.some(existingEvent => 
+                                existingEvent.id === llmUniqueId || 
+                                (existingEvent.title === llmEventTitle && existingEvent.start_datetime === llmEventStart)
+                            ) || eventsFound.some(ef => 
+                                ef.id === llmUniqueId || 
+                                (ef.title === llmEventTitle && ef.start_datetime === llmEventStart)
+                            );
+
+                            if (!isDuplicateLLM) {
+                                console.log(`[extractCalendarEvents] LLM parsed event from email UID ${email.uid}:`, llmResult);
+                                const eventData = {
+                                    id: llmUniqueId,
+                                    title: llmEventTitle,
+                                    start_datetime: llmEventStart,
+                                    end_datetime: llmResult.end_datetime,
+                                    description: llmResult.description || email.subject || '',
+                                    location: llmResult.location || '',
+                                    all_day: false,
+                                    source: 'imap_llm_body_parse',
+                                    created_at: email.date ? new Date(email.date).toISOString() : new Date().toISOString(),
+                                    updated_at: new Date().toISOString(),
+                                    needs_caldav_push: true, // 新事件默认需要推送
+                                };
+                                eventsFound.push(eventData);
+                            } else {
+                                console.log(`[extractCalendarEvents] Skipping duplicate LLM-parsed event found by enhanced check. Title: ${llmEventTitle}, Start: ${llmEventStart}`);
+                            }
+                        } else if(llmResult) {
+                            console.log(`[extractCalendarEvents] LLM parsed email UID ${email.uid} but no valid start date found.`);
+                        } else {
+                             console.log(`[extractCalendarEvents] LLM parsing failed or returned null for email UID ${email.uid}.`);
+                        }
+                    } catch (llmError) {
+                        console.error(`[extractCalendarEvents] Error during LLM parsing for email UID ${email.uid}:`, llmError);
+                    }
+                }
+            } // <-- 结束白名单判断的 else 块
         }
 
         console.log(`[extractCalendarEvents] Finished processing emails. Found ${eventsFound.length} potential new events after duplicate checks.`);
@@ -1321,6 +1351,50 @@ async function performQQCalDavSync() {
              console.log(`[performQQCalDavSync] Removed ${removedLocallyCount} local events that were deleted from server.`); // <-- 修改日志前缀
         }
 
+        // --- 新增：处理需要在服务器上删除的事件 ---
+        let deletedOnServerCount = 0;
+        // 注意：这里的 client 变量需要确保在 performQQCalDavSync 函数作用域内有效且已初始化
+        const eventsMarkedForDeletion = eventsDb.filter(e => e.needs_caldav_delete === true && e.caldav_url && e.source === 'caldav_sync_tsdav');
+
+        if (eventsMarkedForDeletion.length > 0 && client) { // 确保 client 已定义
+            console.log(`[performQQCalDavSync] Found ${eventsMarkedForDeletion.length} events marked for deletion on server.`);
+            for (const eventToDelete of eventsMarkedForDeletion) {
+                try {
+                    console.log(`[performQQCalDavSync] Attempting to delete event ${eventToDelete.id} (${eventToDelete.caldav_url}) from QQ server.`);
+                    
+                    const calendarObjectToDelete = { url: eventToDelete.caldav_url };
+                    // 根据 tsdav 的文档或实际测试，deleteCalendarObject 可能不需要 etag
+                    // 如果需要 If-Match 行为，通常 ETag 会在 calendarObjectToDelete 对象内部传递，例如 calendarObjectToDelete.etag = eventToDelete.caldav_etag;
+                    // 或者作为单独的参数，但 tsdav 的 API 定义似乎更倾向于前者或不使用。
+                    // 我们先尝试不显式传递 ETag，因为 `siyuan-steve-tools` 的 delete 也没传。
+
+                    await client.deleteCalendarObject({ 
+                        calendarObject: calendarObjectToDelete 
+                    });
+
+                    console.log(`[performQQCalDavSync] Successfully deleted event ${eventToDelete.id} from QQ server.`);
+                    eventsDb = eventsDb.filter(e => e.id !== eventToDelete.id);
+                    deletedOnServerCount++;
+                } catch (deleteError) {
+                    console.error(`[performQQCalDavSync] Failed to delete event ${eventToDelete.id} from QQ server:`, deleteError);
+                    let statusCode;
+                    if (deleteError?.response?.status) {
+                        statusCode = deleteError.response.status;
+                    } else if (deleteError?.message?.includes('404')) {
+                        statusCode = 404;
+                    }
+
+                    if (statusCode === 404) {
+                        console.log(`[performQQCalDavSync] Event ${eventToDelete.id} was already deleted on server (404). Removing from local DB.`);
+                        eventsDb = eventsDb.filter(e => e.id !== eventToDelete.id);
+                    } else {
+                        console.warn(`[performQQCalDavSync] Will not remove local CalDAV event ${eventToDelete.id} due to server deletion error. It will be retried.`);
+                    }
+                }
+            }
+        }
+        // --- 结束处理服务器删除 ---
+
         // --- 定义计数器变量 ---
         let pushedToServerCount = 0;
         let updatedOnServerCount = 0;
@@ -1465,44 +1539,36 @@ async function performQQCalDavSync() {
                             iCalString: manualIcsString, // <-- 使用 iCalString 参数和手动生成的字符串
                         });
 
-                        // --- 修改：不再强制检查 etag，只要没抛错就视为成功 ---
-                        // if (createResult && createResult.etag) { // 旧检查
-                        // Assume success if the previous line didn't throw an error
-                        const etag = createResult?.etag; // 尝试获取 etag
-                        if (etag) {
-                             console.log(`[performQQCalDavSync] Successfully created ${filename} on QQ server. ETag: ${etag}`);
-                        } else {
-                             console.log(`[performQQCalDavSync] Successfully created ${filename} on QQ server (No ETag returned, assuming success based on 201 Created).`);
-                        }
-                        pushedToServerCount++;
-                        const indexToUpdate = eventsDb.findIndex(e => e.id === eventToModify.id);
-                        if (indexToUpdate !== -1) {
-                            // 尝试构建 URL
-                            let createdUrl = 'unknown';
-                            try {
-                                 // 确保 targetCalendar.url 末尾有斜杠
-                                 const baseUrl = targetCalendar.url.endsWith('/') ? targetCalendar.url : targetCalendar.url + '/';
-                                 createdUrl = new URL(filename, baseUrl).href; 
-                            } catch(urlError) {
-                                 console.error(`[performQQCalDavSync] Error constructing URL for created event: ${urlError}`);
-                                 createdUrl = `${targetCalendar.url}${filename}`; // Fallback
+                        if (createResult && createResult.etag) {
+                            console.log(`[performQQCalDavSync] Successfully created ${filename} on QQ server. ETag: ${createResult.etag}`);
+                            pushedToServerCount++;
+                            const indexToUpdate = eventsDb.findIndex(e => e.id === eventToModify.id);
+                            if (indexToUpdate !== -1) {
+                                // 尝试构建 URL
+                                let createdUrl = 'unknown';
+                                try {
+                                     // 确保 targetCalendar.url 末尾有斜杠
+                                     const baseUrl = targetCalendar.url.endsWith('/') ? targetCalendar.url : targetCalendar.url + '/';
+                                     createdUrl = new URL(filename, baseUrl).href; 
+                                } catch(urlError) {
+                                     console.error(`[performQQCalDavSync] Error constructing URL for created event: ${urlError}`);
+                                     createdUrl = `${targetCalendar.url}${filename}`; // Fallback
+                                }
+                                eventsDb[indexToUpdate].caldav_url = createdUrl;
+                                eventsDb[indexToUpdate].caldav_uid = eventToModify.id;
+                                eventsDb[indexToUpdate].caldav_etag = createResult.etag;
+                                eventsDb[indexToUpdate].needs_caldav_push = false;
+                                eventsDb[indexToUpdate].source = 'caldav_sync_tsdav'; 
+                                updatedLocallyCount++;
+                                console.log(`[performQQCalDavSync] Updated local event ${eventToModify.id} with QQ CalDAV info after create.`);
+                            } else {
+                                 console.warn(`[performQQCalDavSync] Could not find local event ${eventToModify.id} to update after successful create.`);
                             }
-                            eventsDb[indexToUpdate].caldav_url = createdUrl;
-                            eventsDb[indexToUpdate].caldav_uid = eventToModify.id;
-                            eventsDb[indexToUpdate].caldav_etag = etag || null; // 保存 etag 或 null
-                            eventsDb[indexToUpdate].needs_caldav_push = false;
-                            eventsDb[indexToUpdate].source = 'caldav_sync_tsdav'; 
-                            updatedLocallyCount++;
-                            console.log(`[performQQCalDavSync] Updated local event ${eventToModify.id} with QQ CalDAV info after create.`);
                         } else {
-                             console.warn(`[performQQCalDavSync] Could not find local event ${eventToModify.id} to update after successful create.`);
+                             console.error(`[performQQCalDavSync] Failed to create ${filename} on QQ server. createResult:`, createResult);
+                             // ... (处理 500 错误等) ...
+                             // 如果创建失败，保持 needs_caldav_push 为 true，下次重试
                         }
-                        // } else { // 旧的失败处理逻辑，现在由 catch 块处理
-                        //      console.error(`[performQQCalDavSync] Failed to create ${filename} on QQ server. createResult:`, createResult);
-                        //      // ... (处理 500 错误等) ...
-                        //      // 如果创建失败，保持 needs_caldav_push 为 true，下次重试
-                        // }
-                        // --- 结束修改 ---
                     }
 
                 } catch (pushOrUpdateError) {
@@ -1537,19 +1603,17 @@ async function performQQCalDavSync() {
         
         // --- 结束推送逻辑 --- // 保留推送逻辑在 QQ 函数内
 
-        // 统一保存所有更改 (包括服务器拉取更新的和本地推送更新的)
-        if (addedFromServerCount > 0 || removedLocallyCount > 0 || updatedLocallyCount > 0) {
-            console.log(`[performQQCalDavSync] Saving updated eventsDb. Added: ${addedFromServerCount}, Removed: ${removedLocallyCount}, Pushed&Updated: ${updatedLocallyCount}`); // <-- 修改日志前缀
+        // 统一保存所有更改 (包括服务器拉取更新的、本地推送更新的、以及在服务器上删除的)
+        if (addedFromServerCount > 0 || removedLocallyCount > 0 || updatedLocallyCount > 0 || deletedOnServerCount > 0) {
+            console.log(`[performQQCalDavSync] Saving updated eventsDb. Added: ${addedFromServerCount}, RemovedLocally: ${removedLocallyCount}, PushedOrUpdatedLocally: ${updatedLocallyCount}, DeletedOnServer: ${deletedOnServerCount}`);
             await saveEvents(eventsDb);
         } else {
-             console.log('[performQQCalDavSync] No changes to eventsDb required after sync and push attempt.'); // <-- 修改日志前缀
+             console.log('[performQQCalDavSync] No changes to eventsDb required after sync and push/delete attempt.');
         }
 
-        console.log('[performQQCalDavSync] QQ CalDAV sync process finished.'); // <-- 修改日志前缀
-        // isCalDavSyncRunning = false; // 不再在此函数中管理锁
-        // 汇总返回信息
-        const message = `QQ CalDAV Sync successful. Added ${addedFromServerCount} from server. Removed ${removedLocallyCount} locally. Created ${pushedToServerCount} on server. Updated ${updatedOnServerCount} on server.`;
-        return { message: message, eventCount: addedFromServerCount + pushedToServerCount + updatedOnServerCount - removedLocallyCount }; // 返回净变化量
+        console.log('[performQQCalDavSync] QQ CalDAV sync process finished.');
+        const message = `QQ CalDAV Sync successful. Added ${addedFromServerCount} from server. Removed ${removedLocallyCount} locally. Deleted ${deletedOnServerCount} on server. Created ${pushedToServerCount} on server. Updated ${updatedOnServerCount} on server.`;
+        return { message: message, eventCount: addedFromServerCount + pushedToServerCount + updatedOnServerCount - removedLocallyCount - deletedOnServerCount }; 
 
     } catch (error) {
          console.error('[performQQCalDavSync] Error during QQ CalDAV sync process:', error); // <-- 修改日志前缀
@@ -2548,3 +2612,33 @@ app.post('/sync/caldav', async (req, res) => {
 });
 
 // --- 最后的测试路由 --- 
+
+// --- IMAP Filter 配置路由 ---
+app.get('/config/imap-filter', (req, res) => {
+    res.status(200).json(imapFilterSettings); // imapFilterSettings 应该已在 initializeData 中加载
+});
+
+app.post('/config/imap-filter', async (req, res) => { // async 仍然保留给 Express 路由处理
+    const newSettings = req.body;
+    if (!newSettings || !Array.isArray(newSettings.sender_allowlist) || 
+        !newSettings.sender_allowlist.every(item => typeof item === 'string')) {
+        return res.status(400).json({ error: '无效的IMAP过滤器设置格式。应为 { sender_allowlist: ["email1@example.com"] }.' });
+    }
+    
+    const cleanedAllowlist = newSettings.sender_allowlist
+        .map(email => email.trim().toLowerCase())
+        .filter(email => email.length > 0);
+
+    const oldSettings = { ...imapFilterSettings }; // 保存旧设置以便出错时回滚
+    imapFilterSettings = { sender_allowlist: cleanedAllowlist };
+    
+    try {
+        saveImapFilterSettings(imapFilterSettings); // <-- 移除 await
+        console.log("IMAP过滤器设置已更新并保存:", imapFilterSettings);
+        res.status(200).json({ message: 'IMAP发件人白名单已保存。', settings: imapFilterSettings });
+    } catch (error) {
+        imapFilterSettings = oldSettings; // 保存失败，回滚内存中的设置
+        console.error("保存IMAP过滤器设置失败:", error);
+        res.status(500).json({ error: "保存IMAP过滤器设置失败。" });
+    }
+});

@@ -132,8 +132,8 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
 
   // --- Render ---
   return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-20 flex items-center justify-center">
-      <div className="relative mx-auto p-5 border w-full max-w-lg shadow-lg rounded-md bg-white">
+    <div className="fixed inset-0 overflow-y-auto h-full w-full z-20 flex items-center justify-center pointer-events-none">
+      <div className="relative mx-auto p-5 border border-gray-300 w-full max-w-lg shadow-lg rounded-md bg-white pointer-events-auto">
         <form onSubmit={(e) => { e.preventDefault(); handleSaveClick(); }}>
           <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
              {eventData ? '编辑事件' : '创建新事件'}

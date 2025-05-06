@@ -13,6 +13,7 @@ import { addMonths, addWeeks, addDays } from 'date-fns'; // <-- Import date calc
 import { zhCN } from 'date-fns/locale/zh-CN'; // 引入中文语言包
 import { toast, Toaster } from 'react-hot-toast'; // 用于显示提示信息
 import { Modal, Box } from '@mui/material'; // <-- Import Modal and Box
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday'; // <-- 添加图标导入
 
 // Import the modal component
 import CreateEventModal from '../components/CreateEventModal'; // 假设路径正确
@@ -942,11 +943,16 @@ export default function CalendarPage() {
     <div className="min-h-screen flex flex-col">
       <Toaster position="top-center" />
       
-      {/* 顶部导航栏和设置按钮 - 高度减小 */}
+      {/* 顶部导航栏和设置按钮 */}
       <div className="bg-white shadow-sm flex-shrink-0">
         <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-8 items-center">
-            <h1 className="text-lg font-semibold text-gray-900 whitespace-nowrap">智能日历</h1>
+            {/* 修改标题部分：添加图标并使用 Flexbox */}
+            <div className="flex items-center gap-2"> 
+              <CalendarTodayIcon className="text-gray-700" fontSize="small" /> 
+              <span className="text-lg font-semibold text-gray-900 whitespace-nowrap">潮汐志</span> 
+            </div>
+            {/* 按钮部分保持不变 */}
             <div className="flex items-center space-x-2">
               {/* 智能创建按钮 - 应用统一风格 */}
               <button
@@ -982,7 +988,7 @@ export default function CalendarPage() {
         </div>
       </div>
       
-      {/* 主内容区域 - 减小内边距 */}
+      {/* 主内容区域 */}
       <main className="flex-grow container mx-auto p-2 flex flex-col">
         {/* 日历容器 - 移除内边距，高度设为 h-full */}
         {isLoadingData ? (
