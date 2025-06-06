@@ -45,31 +45,58 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
    */
   useEffect(() => {
     if (eventData) {
-      // Editing mode: Populate from eventData
-      setTitle(eventData.title || '');
-      setStartTime(eventData.start || null);
-      setEndTime(eventData.end || null);
-      setIsAllDay(eventData.allDay || false);
-      setDescription(eventData.description || '');
-      setLocation(eventData.location || '');
-    } else if (slotInfo) {
-      // Creation mode: Populate from slotInfo
-      setTitle(''); // Reset title for new event
-      setStartTime(slotInfo.start);
-      // Default end time: 1 hour after start, or slot end if defined
-      const defaultEndDate = slotInfo.end && slotInfo.end > slotInfo.start
-        ? slotInfo.end
-        : new Date(slotInfo.start.getTime() + 60 * 60 * 1000);
-      setEndTime(defaultEndDate);
-      setIsAllDay(false); // Default to not all-day
-      setDescription('');
-      setLocation('');
+      // 检查 eventData 是否代表一个已存在的事件 (有ID) 或一个来自LLM的预填充建议 (无ID)
+      if (eventData.id) {
+        // Editing mode: Populate from existing eventData (has an ID)
+        setTitle(eventData.title || '');
+        setStartTime(eventData.start || null);
+        setEndTime(eventData.end || null);
+        setIsAllDay(eventData.allDay || false);
+        setDescription(eventData.description || '');
+        setLocation(eventData.location || ''); // 编辑时加载地点
       } else {
-      // Reset form if neither is provided (e.g., modal closed and reopened unexpectedly)
+        // Pre-filling from LLM suggestion: eventData exists but has no ID (or ID is falsy)
+        // 这通常意味着这是后端 /events/parse-natural-language 返回的数据
+        setTitle(eventData.title || '');
+        // 后端返回的 start_datetime, end_datetime 是字符串，需要转换为 Date 对象
+        // MyCalendarEvent 类型定义中 start/end 已经是 Date，假设上层在传递 eventData 时已转换
+        setStartTime(eventData.start || null); 
+        setEndTime(eventData.end || null);
+        setIsAllDay(eventData.allDay || false);
+        setDescription(eventData.description || '');
+        setLocation(eventData.location || ''); // <--- 从LLM预填充地点
+      }
+    } else if (slotInfo) {
+      // Creation mode from calendar slot: Populate from slotInfo (no LLM data involved here directly)
+      setTitle(''); // Reset title for new event from slot
+      setStartTime(slotInfo.start);
+
+      let calculatedDefaultEndDate;
+      const isLikelyMonthViewDayClick =
+        slotInfo.action === 'click' &&
+        slotInfo.start.getHours() === 0 &&
+        slotInfo.start.getMinutes() === 0 &&
+        slotInfo.start.getSeconds() === 0 &&
+        slotInfo.end.getTime() - slotInfo.start.getTime() === 24 * 60 * 60 * 1000;
+
+      if (isLikelyMonthViewDayClick) {
+        calculatedDefaultEndDate = new Date(slotInfo.start.getTime() + 60 * 60 * 1000);
+      } else if (slotInfo.end && slotInfo.end > slotInfo.start) {
+        calculatedDefaultEndDate = slotInfo.end;
+      } else {
+        calculatedDefaultEndDate = new Date(slotInfo.start.getTime() + 60 * 60 * 1000);
+      }
+
+      setEndTime(calculatedDefaultEndDate);
+      setIsAllDay(false); 
+      setDescription('');
+      setLocation(''); // 从日历槽创建时，地点默认为空
+    } else {
+      // Reset form if neither is provided
       setTitle('');
       setStartTime(null);
       setEndTime(null);
-           setIsAllDay(false);
+      setIsAllDay(false);
       setDescription('');
       setLocation('');
     }

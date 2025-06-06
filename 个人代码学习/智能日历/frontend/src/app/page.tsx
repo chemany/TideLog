@@ -14,6 +14,9 @@ import { zhCN } from 'date-fns/locale/zh-CN'; // 引入中文语言包
 import { toast, Toaster } from 'react-hot-toast'; // 用于显示提示信息
 import { Modal, Box } from '@mui/material'; // <-- Import Modal and Box
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday'; // <-- 添加图标导入
+import SettingsIcon from '@mui/icons-material/Settings';
+import NoteAddIcon from '@mui/icons-material/NoteAdd';
+import FileUploadIcon from '@mui/icons-material/FileUpload';
 
 // Import the modal component
 import CreateEventModal from '../components/CreateEventModal'; // 假设路径正确
@@ -178,6 +181,7 @@ export default function CalendarPage() {
   // --- Add State for Controlled View --- 
   const [currentView, setCurrentView] = useState<View>(Views.MONTH);
   const [currentDate, setCurrentDate] = useState<Date>(new Date()); // <-- Add state for calendar date
+  const [nextUpcomingEventId, setNextUpcomingEventId] = useState<string | number | null>(null); // <-- 新增 state
 
   // REMOVED useEffect related to initializing settings form fields
 
@@ -262,6 +266,22 @@ export default function CalendarPage() {
 
     fetchInitialData();
   }, []); // Empty dependency array means this runs once on mount
+
+  // --- 新增：Effect Hook 计算下一个即将发生的事件 ---
+  useEffect(() => {
+    const now = new Date();
+    const upcomingEvents = events
+      .filter(event => event.start > now) // 筛选出开始时间在当前时间之后的事件
+      .sort((a, b) => a.start.getTime() - b.start.getTime()); // 按开始时间升序排序
+
+    if (upcomingEvents.length > 0) {
+      setNextUpcomingEventId(upcomingEvents[0].id ?? null); // 设置第一个事件的 ID
+    } else {
+      setNextUpcomingEventId(null); // 没有即将发生的事件
+    }
+  }, [events]); // 当事件列表变化时重新计算
+  // 注意：这个 effect 不会自动按时间推移更新，只在 events 变化时更新。
+  // 如果需要实时更新（比如每分钟检查一次），需要引入计时器，但会增加复杂性和潜在性能影响。
 
   // --- 新增：事件样式获取器 ---
   /**
@@ -405,52 +425,58 @@ export default function CalendarPage() {
   const handleNaturalLanguageSubmit = useCallback(async () => {
     if (!naturalInput.trim()) { toast.error('请输入事件描述.'); return; }
     setIsParsing(true);
-    const toastId = toast.loading('正在解析文本...', { id: 'parsing-toast' });
+    const toastId = toast.loading('正在解析文本并创建事件...', { id: 'parsing-toast' }); // 更新初始提示
     try {
-        // 1. Parse text using LLM
         const parseResponse = await fetch('http://localhost:8001/events/parse-natural-language', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: naturalInput }),
         });
         if (!parseResponse.ok) {
              const errorData = await parseResponse.json().catch(() => ({ detail: `解析 API 请求失败: ${parseResponse.statusText} - ${parseResponse.status}` }));
-             // 断言 errorData 类型以访问 detail
              const detail = (errorData as { detail?: string }).detail || `解析 API 请求失败: ${parseResponse.statusText}`;
              if (parseResponse.status === 409) { throw new Error("LLM 未配置，请在设置中配置。"); }
              throw new Error(detail);
         }
-        const parsedData: ParsedEventData = await parseResponse.json();
+        // 确保 ParsedEventData 接口定义与后端返回一致，特别是 is_all_day, description, location
+        interface ExtendedParsedEventData extends ParsedEventData {
+            is_all_day?: boolean;
+            description?: string;
+            location?: string;
+        }
+        const parsedData: ExtendedParsedEventData = await parseResponse.json();
 
-        // 2. Check if date/time was found
         if (!parsedData.start_datetime) {
             toast.error('无法从文本中解析出有效的日期和时间。', { id: toastId });
             setIsParsing(false);
             return;
         }
 
-         // 3. Create the event via POST /events
+        // 直接使用解析的数据创建事件 POST 请求的 payload
         const payload: EventCreatePayload = {
             title: parsedData.title || '未命名事件',
-            start_datetime: parsedData.start_datetime,
-            end_datetime: parsedData.end_datetime,
-            description: naturalInput,
-            // 假设 is_all_day 由后端根据时间判断或默认为 false
+            start_datetime: parsedData.start_datetime, // 已经是字符串
+            end_datetime: parsedData.end_datetime,     // 已经是字符串或null
+            is_all_day: parsedData.is_all_day,       // 从解析结果获取
+            description: parsedData.description || naturalInput, // 优先使用解析的描述，否则用原始输入
+            location: parsedData.location,           // <--- 使用从LLM解析的地点
+            source: 'llm_direct_create'             // 标记来源为LLM直接创建
         };
+        
+        console.log("[NLP Submit] Payload for creating event:", payload);
 
         const createResponse = await fetch('http://localhost:8001/events', {
              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
 
-         if (!createResponse.ok) {
+        if (!createResponse.ok) {
              const errorData = await createResponse.json().catch(() => ({ detail: `创建事件 API 请求失败: ${createResponse.statusText} - ${createResponse.status}` }));
-             // 断言 errorData 类型
              const detail = (errorData as { detail?: string }).detail || `创建事件 API 请求失败: ${createResponse.statusText}`;
              throw new Error(detail);
-         }
+        }
 
-         const createdEventRaw: RawBackendEvent = await createResponse.json();
+        const createdEventRaw: RawBackendEvent = await createResponse.json();
 
-        // 4. Update frontend state with the confirmed event
-         const newCalendarEvent: MyCalendarEvent = {
+        // 将后端返回的事件转换为前端格式并添加到日历
+        const newCalendarEvent: MyCalendarEvent = {
             id: createdEventRaw.id,
             title: createdEventRaw.title || '无标题事件',
             start: new Date(createdEventRaw.start_datetime),
@@ -458,22 +484,18 @@ export default function CalendarPage() {
             allDay: createdEventRaw.is_all_day || false,
             completed: createdEventRaw.completed || false,
             description: createdEventRaw.description,
-            location: createdEventRaw.location,
+            location: createdEventRaw.location, // <--- 确保这里也从后端返回的数据中获取地点
             created_at: createdEventRaw.created_at ? new Date(createdEventRaw.created_at) : undefined,
             updated_at: createdEventRaw.updated_at ? new Date(createdEventRaw.updated_at) : undefined,
         };
-         console.log("[Submit] Before setEvents, newCalendarEvent:", newCalendarEvent);
-         setEvents(prevEvents => {
-             const updatedEvents = [...prevEvents, newCalendarEvent];
-             console.log("[Submit] Inside setEvents callback, updatedEvents count:", updatedEvents.length);
-             return updatedEvents;
-         });
-         console.log("[Submit] After setEvents call");
 
-        // 5. Close modal and give success feedback
-        setShowSmartCreateModal(false);
+        setEvents(prevEvents => [...prevEvents, newCalendarEvent]);
+        
+        // 清空智能输入框并关闭智能创建的浮动模态框
         setNaturalInput('');
-        toast.success('智能创建成功！', { id: toastId });
+        setShowSmartCreateModal(false);
+        
+        toast.success('智能创建成功！', { id: toastId }); // 改回成功提示
 
     } catch (error) {
         console.error("Error in natural language submission flow:", error);
@@ -481,7 +503,7 @@ export default function CalendarPage() {
     } finally {
       setIsParsing(false);
     }
-  }, [naturalInput]);
+  }, [naturalInput, setEvents, setNaturalInput, setShowSmartCreateModal]);
 
   // --- Add Navigation Handler ---
   /**
@@ -943,46 +965,57 @@ export default function CalendarPage() {
     <div className="min-h-screen flex flex-col">
       <Toaster position="top-center" />
       
-      {/* 顶部导航栏和设置按钮 */}
+      {/* 顶部导航栏和设置按钮 - 高度调整 */}
       <div className="bg-white shadow-sm flex-shrink-0">
         <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-8 items-center">
-            {/* 修改标题部分：添加图标并使用 Flexbox */}
-            <div className="flex items-center gap-2"> 
-              <CalendarTodayIcon className="text-gray-700" fontSize="small" /> 
-              <span className="text-lg font-semibold text-gray-900 whitespace-nowrap">潮汐志</span> 
+          {/* 将 h-12 改为 h-9 (3rem -> 2.25rem / 36px) */}
+          <div className="flex justify-between h-9 items-center">
+            {/* 调整标题部分 */}
+            <div className="flex items-center gap-1">
+              {/* 调整图标大小 */}
+              <CalendarTodayIcon className="text-gray-700" sx={{ fontSize: '1.125rem' }} />
+              {/* 调整字体大小 */}
+              <span className="text-base font-semibold text-gray-900 whitespace-nowrap">潮汐志</span>
             </div>
-            {/* 按钮部分保持不变 */}
-            <div className="flex items-center space-x-2">
-              {/* 智能创建按钮 - 应用统一风格 */}
+            {/* 调整按钮部分 */}
+            <div className="flex items-center space-x-1.5">
+              {/* 调整按钮的 padding 和字体大小 */}
               <button
                   onClick={() => setShowSmartCreateModal(true)}
-                  className="unified-button"
+                  className="flex items-center space-x-1 px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
               >
-                  智能创建
+                  <NoteAddIcon sx={{ fontSize: '1rem' }} />
+                  <span>智能创建</span>
               </button>
-              {/* 新增：导入文档按钮 */}
               <button
-                  onClick={() => document.getElementById('doc-import-input')?.click()} // 触发隐藏的input点击
-                  className="unified-button" 
+                  onClick={() => document.getElementById('doc-import-input')?.click()}
+                  className="flex items-center space-x-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-1"
               >
-                  导入文档
+                  <FileUploadIcon sx={{ fontSize: '1rem' }} />
+                  <span>导入文档</span>
               </button>
-              {/* 隐藏的文件输入框 */}
               <input 
                 type="file" 
+                accept=".txt,.docx"
                 id="doc-import-input" 
                 style={{ display: 'none' }} 
-                accept=".txt,.docx" // <-- 允许 .docx 文件
-                onChange={handleFileSelected} // 保持不变，但其内部逻辑会改变
+                onChange={handleFileSelected}
               />
-              {/* 设置按钮 - 替换为普通按钮并应用统一风格 */}
               <button 
                 onClick={toggleSettings} 
-                className="unified-button"
+                className="flex items-center space-x-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-1"
               >
-                 设置
+                 <SettingsIcon sx={{ fontSize: '1rem' }} />
+                 <span>设置</span>
               </button>
+              <a
+                href="http://localhost:3000/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center px-2.5 py-1 bg-teal-500 hover:bg-teal-600 text-white rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-400 focus:ring-offset-1 no-underline"
+              >
+                灵枢笔记
+              </a>
             </div>
           </div>
         </div>
@@ -1025,12 +1058,16 @@ export default function CalendarPage() {
                 // ----------------------------------
                 eventPropGetter={eventPropGetter as (event: RbcEvent) => { style: React.CSSProperties }}
                 components={{
-                  event: (props) => <CustomEventComponent 
-                                      {...props} 
-                                      event={props.event as MyCalendarEvent} 
-                                      onToggleComplete={handleToggleComplete} 
-                                      onDelete={handleDeleteEvent}
-                                    />
+                  event: (props) => (
+                    <CustomEventComponent 
+                      {...props} 
+                      event={props.event as MyCalendarEvent} // 断言类型
+                      onToggleComplete={handleToggleComplete} 
+                      onDelete={handleDeleteEvent}
+                      // 将 nextUpcomingEventId 直接传递给子组件
+                      nextUpcomingEventId={nextUpcomingEventId}
+                    />
+                  )
                 }}
               />
             </div>
