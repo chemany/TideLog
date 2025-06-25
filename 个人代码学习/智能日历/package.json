@@ -1,8 +1,0 @@
-{
-  "dependencies": {
-    "asclient": "^0.1.0",
-    "ews-javascript-api": "^0.15.3",
-    "node-ical": "^0.20.1",
-    "tsdav": "^2.1.4"
-  }
-}

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能日历混合设置服务测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        button {
+            background: #007cba;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #005a87;
+        }
+        .result {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        .error {
+            border-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status.online {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>智能日历混合设置服务测试</h1>
+        <p>测试认证功能（统一设置服务）+ 设置存储（本地设置服务）的混合架构</p>
+        
+        <div class="test-section">
+            <h3>服务状态检查</h3>
+            <button onclick="checkServices()">检查服务状态</button>
+            <div id="serviceStatus"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>认证功能测试（统一设置服务）</h3>
+            <button onclick="testLogin()">测试登录</button>
+            <button onclick="testAuthStatus()">检查认证状态</button>
+            <button onclick="testLogout()">测试注销</button>
+            <div id="authResult"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>设置存储测试（本地设置服务）</h3>
+            <button onclick="testGetLLMSettings()">获取LLM设置</button>
+            <button onclick="testSaveLLMSettings()">保存LLM设置</button>
+            <button onclick="testGetExchangeSettings()">获取Exchange设置</button>
+            <div id="settingsResult"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>混合服务完整测试</h3>
+            <button onclick="testFullWorkflow()">完整工作流测试</button>
+            <div id="workflowResult"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        // 导入混合设置服务
+        import hybridSettingsService from './frontend/src/services/hybridSettingsService.js';
+        
+        // 全局暴露给测试函数使用
+        window.hybridSettingsService = hybridSettingsService;
+
+        // 服务状态检查
+        window.checkServices = async function() {
+            const result = document.getElementById('serviceStatus');
+            result.innerHTML = '检查中...';
+            
+            try {
+                const available = await hybridSettingsService.isAvailable();
+                const authService = hybridSettingsService.authService;
+                const settingsService = hybridSettingsService.settingsService;
+                
+                const authAvailable = await authService.isAvailable();
+                const settingsAvailable = await settingsService.isAvailable();
+                
+                result.innerHTML = `
+<div>
+    <h4>服务状态总览</h4>
+    <p>混合服务: <span class="status ${available ? 'online' : 'offline'}">${available ? '在线' : '离线'}</span></p>
+    <p>认证服务 (统一设置): <span class="status ${authAvailable ? 'online' : 'offline'}">${authAvailable ? '在线' : '离线'}</span></p>
+    <p>设置服务 (本地后端): <span class="status ${settingsAvailable ? 'online' : 'offline'}">${settingsAvailable ? '在线' : '离线'}</span></p>
+</div>`;
+                result.className = 'result ' + (available ? 'success' : 'error');
+            } catch (error) {
+                result.innerHTML = `错误: ${error.message}`;
+                result.className = 'result error';
+            }
+        };
+
+        // 认证功能测试
+        window.testLogin = async function() {
+            const result = document.getElementById('authResult');
+            result.innerHTML = '测试登录中...';
+            
+            try {
+                const loginResult = await hybridSettingsService.login({
+                    email: 'test@example.com',
+                    password: 'testpassword'
+                });
+                
+                result.innerHTML = `登录测试结果: ${loginResult ? '成功' : '失败'}`;
+                result.className = 'result ' + (loginResult ? 'success' : 'error');
+            } catch (error) {
+                result.innerHTML = `登录测试错误: ${error.message}`;
+                result.className = 'result error';
+            }
+        };
+
+        window.testAuthStatus = async function() {
+            const result = document.getElementById('authResult');
+            result.innerHTML = '检查认证状态中...';
+            
+            try {
+                const isLoggedIn = hybridSettingsService.isLoggedIn();
+                const currentUser = hybridSettingsService.getCurrentUser();
+                
+                result.innerHTML = `
+认证状态: ${isLoggedIn ? '已登录' : '未登录'}
+当前用户: ${JSON.stringify(currentUser, null, 2)}`;
+                result.className = 'result success';
+            } catch (error) {
+                result.innerHTML = `认证状态检查错误: ${error.message}`;
+                result.className = 'result error';
+            }
+        };
+
+        window.testLogout = async function() {
+            const result = document.getElementById('authResult');
+            result.innerHTML = '注销中...';
+            
+            try {
+                await hybridSettingsService.logout();
+                result.innerHTML = '注销成功';
+                result.className = 'result success';
+            } catch (error) {
+                result.innerHTML = `注销错误: ${error.message}`;
+                result.className = 'result error';
+            }
+        };
+
+        // 设置存储测试
+        window.testGetLLMSettings = async function() {
+            const result = document.getElementById('settingsResult');
+            result.innerHTML = '获取LLM设置中...';
+            
+            try {
+                const settings = await hybridSettingsService.getLLMSettings(true); // 跳过认证检查
+                result.innerHTML = `LLM设置:
+${JSON.stringify(settings, null, 2)}`;
+                result.className = 'result success';
+            } catch (error) {
+                result.innerHTML = `获取LLM设置错误: ${error.message}`;
+                result.className = 'result error';
+            }
+        };
+
+        window.testSaveLLMSettings = async function() {
+            const result = document.getElementById('settingsResult');
+            result.innerHTML = '保存LLM设置中...';
+            
+            try {
+                const testSettings = {
+                    provider: 'builtin',
+                    api_key: 'BUILTIN_PROXY',
+                    base_url: 'BUILTIN_PROXY',
+                    model_name: 'test-model',
+                    temperature: 0.8,
+                    maxTokens: 1500
+                };
+                
+                const success = await hybridSettingsService.saveLLMSettings(testSettings);
+                result.innerHTML = `保存LLM设置结果: ${success ? '成功' : '失败'}`;
+                result.className = 'result ' + (success ? 'success' : 'error');
+            } catch (error) {
+                result.innerHTML = `保存LLM设置错误: ${error.message}`;
+                result.className = 'result error';
+            }
+        };
+
+        window.testGetExchangeSettings = async function() {
+            const result = document.getElementById('settingsResult');
+            result.innerHTML = '获取Exchange设置中...';
+            
+            try {
+                const settings = await hybridSettingsService.getExchangeSettings(true); // 跳过认证检查
+                result.innerHTML = `Exchange设置:
+${JSON.stringify(settings, null, 2)}`;
+                result.className = 'result success';
+            } catch (error) {
+                result.innerHTML = `获取Exchange设置错误: ${error.message}`;
+                result.className = 'result error';
+            }
+        };
+
+        // 完整工作流测试
+        window.testFullWorkflow = async function() {
+            const result = document.getElementById('workflowResult');
+            result.innerHTML = '执行完整工作流测试中...\n';
+            
+            const log = (message) => {
+                result.innerHTML += `${new Date().toLocaleTimeString()}: ${message}\n`;
+            };
+            
+            try {
+                // 1. 检查服务状态
+                log('1. 检查服务状态...');
+                const available = await hybridSettingsService.isAvailable();
+                log(`   服务状态: ${available ? '可用' : '不可用'}`);
+                
+                if (!available) {
+                    throw new Error('混合服务不可用');
+                }
+                
+                // 2. 检查认证状态（不需要实际登录）
+                log('2. 检查认证状态...');
+                const isLoggedIn = hybridSettingsService.isLoggedIn();
+                log(`   认证状态: ${isLoggedIn ? '已认证' : '未认证'}`);
+                
+                // 3. 测试设置读取
+                log('3. 测试设置读取...');
+                const llmSettings = await hybridSettingsService.getLLMSettings(true);
+                log(`   LLM设置读取成功: provider=${llmSettings.provider}`);
+                
+                // 4. 测试设置保存
+                log('4. 测试设置保存...');
+                const testSettings = {
+                    ...llmSettings,
+                    temperature: 0.9,
+                    maxTokens: 1800
+                };
+                const saveSuccess = await hybridSettingsService.saveLLMSettings(testSettings);
+                log(`   设置保存结果: ${saveSuccess ? '成功' : '失败'}`);
+                
+                // 5. 验证保存结果
+                log('5. 验证保存结果...');
+                const updatedSettings = await hybridSettingsService.getLLMSettings(true);
+                log(`   验证成功: temperature=${updatedSettings.temperature}`);
+                
+                log('\n✅ 完整工作流测试成功！');
+                result.className = 'result success';
+                
+            } catch (error) {
+                log(`\n❌ 工作流测试失败: ${error.message}`);
+                result.className = 'result error';
+            }
+        };
+
+        // 页面加载完成后自动检查服务状态
+        window.addEventListener('load', () => {
+            setTimeout(checkServices, 1000);
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,16 @@
+{
+  "name": "智能日历",
+  "short_name": "智能日历",
+  "description": "AI智能日历应用",
+  "start_url": "/calendars/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1976d2",
+  "icons": [
+    {
+      "src": "/calendars/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+} 

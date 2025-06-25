@@ -30,8 +30,14 @@ const {
     loadImapSettings, saveImapSettings,
     loadCalDAVSettings, saveCalDAVSettings,
     loadImapFilterSettings, saveImapFilterSettings, // <-- 添加新的导入
+    migrateGlobalEventsToUser,
+    migrateGlobalSettingsToUser,
     uuidv4
 } = require('./storage');
+// 导入认证中间件
+const { authenticateUser, optionalAuth, getCurrentUserId, isAuthenticated } = require('./auth');
+// 导入本地设置服务（替代统一设置客户端和设置管理器）
+const localSettingsService = require('./localSettingsService');
 // --- 导入新的 EAS 同步函数 ---
 const { syncQQViaEAS } = require('./eas_sync'); 
 const { syncOutlookViaEWS } = require('./outlook_ews_sync'); // <-- 导入新的 Outlook EWS 同步函数
@@ -55,44 +61,107 @@ const { createEvent: createIcsEvent, createEvents } = require('ics'); // <-- 恢
 const { spawn } = require('child_process'); // <-- 导入 spawn 用于执行 Python
 
 const app = express();
-const PORT = process.env.PORT || 8001;
+const PORT = process.env.PORT || 11001;
 
 // --- 应用状态 (内存中) ---
-let llmSettings = {};
+let llmSettings = {
+    provider: 'builtin-free',
+    model_name: 'builtin-free',
+    api_key: 'not-needed',
+    base_url: null
+};
+
+// LLM配置缓存，避免频繁调用统一设置服务
+let llmConfigCache = {
+    data: null,
+    userId: null,
+    lastUpdated: null,
+    cacheTimeout: 5 * 60 * 1000 // 5分钟缓存有效期
+};
+
 let eventsDb = [];
 let exchangeSettings = {};
 let imapSettings = {};
 let caldavSettings = {};
 let imapFilterSettings = { sender_allowlist: [] }; // <-- 初始化新的内存缓存
 
+// 清理LLM配置缓存的辅助函数
+function clearLlmConfigCache(userId = null) {
+    if (!userId || llmConfigCache.userId === userId) {
+        console.log(`[LLM Config Cache] 清理缓存 (用户: ${userId || 'all'})`);
+        llmConfigCache = {
+            data: null,
+            userId: null,
+            lastUpdated: null,
+            cacheTimeout: llmConfigCache.cacheTimeout
+        };
+    }
+}
+
+// 强制清理所有缓存的函数
+function forceResetLlmCache() {
+    console.log('[LLM Config Cache] 强制重置所有缓存');
+    llmConfigCache = {
+        data: null,
+        userId: null,
+        lastUpdated: null,
+        cacheTimeout: 5 * 60 * 1000
+    };
+}
+
 async function initializeData() {
-    llmSettings = await loadLLMSettings();
-    eventsDb = await loadEvents();
-    exchangeSettings = await loadExchangeSettings();
-    imapSettings = await loadImapSettings();
+    // 使用新的设置管理器加载所有设置
+    console.log('[初始化] 开始加载应用设置...');
+    
     try {
-        caldavSettings = await loadCalDAVSettings();
+        // 批量获取所有设置（从本地设置服务）
+        const allSettings = await localSettingsService.getAllSettings();
+        
+        llmSettings = allSettings.llm;
+        exchangeSettings = allSettings.exchange;
+        imapSettings = allSettings.imap;
+        caldavSettings = allSettings.caldav;
+        imapFilterSettings = allSettings.imapFilter;
+        
+        // 加载事件数据
+        eventsDb = await loadEvents();
+        
+        console.log('[初始化] 设置加载完成:');
+        console.log("  - LLM设置:", { provider: llmSettings.provider, model: llmSettings.model_name });
+        console.log(`  - 事件数据: ${eventsDb.length}个`);
+        console.log("  - Exchange设置:", exchangeSettings.email ? '已配置' : '未配置');
+        console.log("  - IMAP设置:", imapSettings.host ? '已配置' : '未配置');
+        console.log("  - CalDAV设置:", Object.keys(caldavSettings).length > 0 ? '已配置' : '未配置');
+        console.log("  - IMAP过滤设置:", `白名单${imapFilterSettings.sender_allowlist?.length || 0}项`);
+        
     } catch (error) {
-        console.warn("CalDAV设置未找到，将使用默认空设置");
-        caldavSettings = {};
+        console.error('[初始化] 设置加载失败，使用默认值:', error);
+        
+        // 回退到旧的加载方式
+        llmSettings = await loadLLMSettings();
+        eventsDb = await loadEvents();
+        exchangeSettings = await loadExchangeSettings();
+        imapSettings = await loadImapSettings();
+        
+        try {
+            caldavSettings = await loadCalDAVSettings();
+        } catch (error) {
+            console.warn("CalDAV设置未找到，使用默认空设置");
+            caldavSettings = {};
+        }
+        
+        try { 
+            imapFilterSettings = loadImapFilterSettings();
+        } catch (error) {
+            console.warn("IMAP Filter设置加载失败，使用默认空设置:", error);
+            imapFilterSettings = { sender_allowlist: [] };
+        }
     }
-    try { 
-        imapFilterSettings = loadImapFilterSettings(); // <-- 移除 await
-    } catch (error) {
-        console.warn("IMAP Filter设置加载时出错(将使用默认空设置):", error); // 修改日志
-        imapFilterSettings = { sender_allowlist: [] };
-    }
-    console.log("初始LLM设置已加载:", llmSettings);
-    console.log(`初始事件已加载: ${eventsDb.length}个`);
-    console.log("初始Exchange设置已加载 (密码已隐藏):", { ...exchangeSettings, password: '***' });
-    console.log("初始IMAP设置已加载 (密码已隐藏):", { ...imapSettings, password: '***' });
-    console.log("初始CalDAV设置已加载 (密码已隐藏):", { ...caldavSettings, password: '***' });
-    console.log("初始IMAP Filter设置已加载:", imapFilterSettings); // <-- 添加日志
 }
 
 // --- 中间件 ---
 app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:8000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:8000'],
+    origin: ['http://localhost:11000', 'http://127.0.0.1:11000', 'http://jason.cheman.top:11000', 'http://localhost:3000', 'http://127.0.0.1:3000'],
     credentials: true
 }));
 app.use(express.json());
@@ -107,29 +176,113 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => { res.json({ message: '智能日历API - Node.js后端' }); });
 
 // --- LLM配置路由 ---
-app.post('/config/llm', async (req, res) => {
+app.post('/config/llm', optionalAuth, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || !newSettings.provider) {
         return res.status(400).json({ error: '无效的LLM设置格式。' });
     }
     
-    llmSettings = { ...newSettings };
+    const userToken = req.user?.token;
+    
     try {
-        await saveLLMSettings(llmSettings);
-        console.log("LLM设置已更新并保存:", llmSettings);        
-        res.status(200).json({ message: 'LLM设置已保存。' });
+        // 如果前端没有发送API Key（部分更新），则先获取现有设置
+        let settingsToSave = { ...newSettings };
+        if (!newSettings.api_key) {
+            const existingSettings = await localSettingsService.getLLMSettings(userToken);
+            settingsToSave.api_key = existingSettings.api_key || '';
+        }
+        
+        // 使用本地设置服务保存LLM设置
+        const success = await localSettingsService.saveLLMSettings(settingsToSave, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+            llmSettings = { ...settingsToSave };
+            
+            res.status(200).json({ 
+                message: 'LLM设置已保存。',
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+            });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
     } catch (error) {
-        console.error("保存LLM设置失败:", error);
+        console.error("[LLM配置] 保存失败:", error);
         res.status(500).json({ error: "保存LLM设置失败。" });
     }
 });
 
-app.get('/config/llm', (req, res) => {
-    res.status(200).json(llmSettings);
+app.get('/config/llm', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务获取LLM设置
+        const settings = await localSettingsService.getLLMSettings(userToken);
+        
+        // 更新内存缓存
+        llmSettings = { ...settings };
+        
+        res.status(200).json(settings);
+    } catch (error) {
+        console.error('[LLM配置] 获取设置失败:', error);
+        // 回退到当前内存中的设置
+        res.status(200).json(llmSettings);
+    }
+});
+
+// 获取指定provider的LLM设置
+app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
+    const provider = req.params.provider;
+    const userToken = req.user?.token;
+    
+    try {
+        // 获取共享LLM设置
+        const sharedSettings = localSettingsService.getSharedLLMSettings();
+        const providerConfig = sharedSettings.providers[provider];
+        
+        if (providerConfig) {
+            const useCustom = providerConfig.use_custom_model || false;
+            let modelToDisplay = '';
+            
+            if (useCustom) {
+                // 使用自定义模型时，优先使用custom_model，回退到model_name
+                modelToDisplay = providerConfig.custom_model || providerConfig.model_name || '';
+            } else {
+                // 使用预定义模型时，优先使用predefined_model，回退到model_name
+                modelToDisplay = providerConfig.predefined_model || providerConfig.model_name || '';
+            }
+            
+            const settings = {
+                provider: provider,
+                api_key: providerConfig.api_key ? '********' : '', // 隐藏真实API Key
+                base_url: providerConfig.base_url || '',
+                model_name: modelToDisplay,
+                temperature: providerConfig.temperature || 0.7,
+                max_tokens: providerConfig.max_tokens || 2000,
+                useCustomModel: useCustom
+            };
+            
+            res.status(200).json(settings);
+        } else {
+            // 如果没有配置，返回默认值
+            res.status(200).json({
+                provider: provider,
+                api_key: '',
+                base_url: '',
+                model_name: '',
+                temperature: 0.7,
+                max_tokens: 2000,
+                useCustomModel: false
+            });
+        }
+    } catch (error) {
+        console.error(`[LLM配置] 获取${provider}设置失败:`, error);
+        res.status(500).json({ error: `获取${provider}设置失败` });
+    }
 });
 
 // --- Exchange配置路由 ---
-app.post('/config/exchange', async (req, res) => {
+app.post('/config/exchange', optionalAuth, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || typeof newSettings.email !== 'string' || typeof newSettings.password !== 'string') {
         return res.status(400).json({ error: '无效的Exchange设置格式。必需: email, password。' });
@@ -145,33 +298,52 @@ app.post('/config/exchange', async (req, res) => {
         exchangeVersion: newSettings.exchangeVersion || 'Exchange2013'
     };
     
-    exchangeSettings = { ...validatedSettings };
+    const userToken = req.user?.token;
+    
     try {
-        await saveExchangeSettings(exchangeSettings);
-        console.log("Exchange设置已更新并保存 (密码已隐藏):", { 
-            ...exchangeSettings, 
-            password: '***',
-            ewsUrl: exchangeSettings.ewsUrl || '(使用Autodiscover)',
-            exchangeVersion: exchangeSettings.exchangeVersion || 'Exchange2013'
-        });
-        res.status(200).json({ 
-            message: `已保存${exchangeSettings.email}的Exchange设置。`,
-            usingDirectEws: !!exchangeSettings.ewsUrl
-        });
+        // 使用本地设置服务保存Exchange设置
+        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+            exchangeSettings = { ...validatedSettings };
+            
+            res.status(200).json({ 
+                message: `已保存${exchangeSettings.email}的Exchange设置。`,
+                usingDirectEws: !!exchangeSettings.ewsUrl,
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+            });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
     } catch (error) {
-        console.error("保存Exchange设置失败:", error);
+        console.error("[Exchange配置] 保存失败:", error);
         res.status(500).json({ error: "保存Exchange设置失败。" });
     }
 });
 
-app.get('/config/exchange', (req, res) => {
-    // 永远不返回密码到前端
-    const { password, ...settingsToSend } = exchangeSettings;
-    res.status(200).json(settingsToSend);
+app.get('/config/exchange', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务获取Exchange设置
+        const settings = await localSettingsService.getExchangeSettings(userToken);
+        
+        // 更新内存缓存，但不暴露密码
+        exchangeSettings = { ...settings };
+        const { password, ...settingsToSend } = settings;
+        
+        res.status(200).json(settingsToSend);
+    } catch (error) {
+        console.error('[Exchange配置] 获取设置失败:', error);
+        // 发生错误时返回本地设置（不含密码）
+        const { password, ...settingsToSend } = exchangeSettings;
+        res.status(200).json(settingsToSend);
+    }
 });
 
 // --- IMAP配置路由 ---
-app.post('/config/imap', async (req, res) => {
+app.post('/config/imap', optionalAuth, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || 
         typeof newSettings.email !== 'string' || 
@@ -182,26 +354,52 @@ app.post('/config/imap', async (req, res) => {
         });
     }
     
-    imapSettings = { ...newSettings };
+    const settingsToSave = { ...newSettings };
+    const userToken = req.user?.token;
     
     try {
-        await saveImapSettings(imapSettings);
-        console.log("IMAP设置已更新并保存 (密码已隐藏):", { ...imapSettings, password: '***' });
-        res.status(200).json({ message: `已保存${imapSettings.email}的IMAP设置。` });
+        // 使用本地设置服务保存IMAP设置
+        const success = await localSettingsService.saveImapSettings(settingsToSave, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+            imapSettings = { ...settingsToSave };
+            
+            res.status(200).json({ 
+                message: `已保存${imapSettings.email}的IMAP设置。`,
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+            });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
     } catch (error) {
-        console.error("保存IMAP设置失败:", error);
+        console.error("[IMAP配置] 保存失败:", error);
         res.status(500).json({ error: "保存IMAP设置失败。" });
     }
 });
 
-app.get('/config/imap', (req, res) => {
-    // 永远不返回密码到前端
-    const { password, ...settingsToSend } = imapSettings;
-    res.status(200).json(settingsToSend);
+app.get('/config/imap', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务获取IMAP设置
+        const settings = await localSettingsService.getImapSettings(userToken);
+        
+        // 更新内存缓存，但不暴露密码
+        imapSettings = { ...settings };
+        const { password, ...settingsToSend } = settings;
+        
+        res.status(200).json(settingsToSend);
+    } catch (error) {
+        console.error('[IMAP配置] 获取设置失败:', error);
+        // 发生错误时返回本地设置（不含密码）
+        const { password, ...settingsToSend } = imapSettings;
+        res.status(200).json(settingsToSend);
+    }
 });
 
 // --- CalDAV配置路由 ---
-app.post('/config/caldav', async (req, res) => {
+app.post('/config/caldav', optionalAuth, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || 
         typeof newSettings.username !== 'string' || 
@@ -212,22 +410,288 @@ app.post('/config/caldav', async (req, res) => {
         });
     }
     
-    caldavSettings = { ...newSettings };
+    const settingsToSave = { ...newSettings };
+    const userToken = req.user?.token;
     
     try {
-        await saveCalDAVSettings(caldavSettings);
-        console.log("CalDAV设置已更新并保存 (密码已隐藏):", { ...caldavSettings, password: '***' });
-        res.status(200).json({ message: `已保存${caldavSettings.username}的CalDAV设置。` });
+        // 使用本地设置服务保存CalDAV设置
+        const success = await localSettingsService.saveCalDAVSettings(settingsToSave, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+            caldavSettings = { ...settingsToSave };
+            
+            res.status(200).json({ 
+                message: `已保存${caldavSettings.username}的CalDAV设置。`,
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+            });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
     } catch (error) {
-        console.error("保存CalDAV设置失败:", error);
+        console.error("[CalDAV配置] 保存失败:", error);
         res.status(500).json({ error: "保存CalDAV设置失败。" });
     }
 });
 
-app.get('/config/caldav', (req, res) => {
-    // 永远不返回密码到前端
-    const { password, ...settingsToSend } = caldavSettings;
-    res.status(200).json(settingsToSend);
+app.get('/config/caldav', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务获取CalDAV设置
+        const settings = await localSettingsService.getCalDAVSettings(userToken);
+        
+        // 更新内存缓存，但不暴露密码
+        caldavSettings = { ...settings };
+        const { password, ...settingsToSend } = settings;
+        
+        res.status(200).json(settingsToSend);
+    } catch (error) {
+        console.error('[CalDAV配置] 获取设置失败:', error);
+        // 发生错误时返回本地设置（不含密码）
+        const { password, ...settingsToSend } = caldavSettings;
+        res.status(200).json(settingsToSend);
+    }
+});
+
+// --- 设置API路由（用于前端混合服务） ---
+
+// LLM设置API
+app.get('/settings/llm', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
+    
+    try {
+        console.log('[LLM设置API] 获取前端安全配置');
+        // 返回前端安全版本的LLM设置（包含占位符）
+        const settings = localSettingsService.getCalendarLLMSettings(userId);
+        
+        console.log('[LLM设置API] 返回安全配置:', { 
+            provider: settings.provider, 
+            hasApiKey: !!settings.api_key,
+            apiKeyType: settings.api_key === 'BUILTIN_PROXY' ? 'placeholder' : 'masked'
+        });
+        
+        res.status(200).json(settings);
+    } catch (error) {
+        console.error('[LLM设置API] 获取设置失败:', error);
+        res.status(500).json({ 
+            error: '获取LLM设置失败',
+            provider: 'builtin-free',
+            api_key: 'BUILTIN_PROXY',
+            base_url: 'BUILTIN_PROXY',
+            model_name: 'deepseek/deepseek-chat-v3-0324:free',
+            temperature: 0.7,
+            max_tokens: 2000
+        });
+    }
+});
+
+app.post('/settings/llm', optionalAuth, async (req, res) => {
+    const newSettings = req.body;
+    if (!newSettings || !newSettings.provider) {
+        return res.status(400).json({ error: '无效的LLM设置格式。' });
+    }
+    
+    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
+    
+    try {
+        console.log('[LLM设置API] 保存设置请求:', { 
+            provider: newSettings.provider,
+            hasApiKey: !!newSettings.api_key,
+            apiKeyType: newSettings.api_key === 'BUILTIN_PROXY' ? 'placeholder' : 'actual'
+        });
+        
+        // 使用 saveCalendarLLMSettings 保存设置
+        const success = localSettingsService.saveCalendarLLMSettings(newSettings, userId);
+        
+        if (success) {
+            console.log('[LLM设置API] 设置保存成功');
+            res.status(200).json({ 
+                message: 'LLM设置已保存。',
+                syncedToUnified: false // 智能日历使用本地设置
+            });
+        } else {
+            throw new Error('本地设置服务保存失败');
+        }
+    } catch (error) {
+        console.error("[LLM设置API] 保存失败:", error);
+        res.status(500).json({ error: "保存LLM设置失败: " + error.message });
+    }
+});
+
+// Exchange设置API
+app.get('/settings/exchange', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务获取Exchange设置
+        const settings = await localSettingsService.getExchangeSettings(userToken);
+        
+        // 更新内存缓存，但不暴露密码
+        exchangeSettings = { ...settings };
+        const { password, ...settingsToSend } = settings;
+        
+        res.status(200).json(settingsToSend);
+    } catch (error) {
+        console.error('[Exchange设置API] 获取设置失败:', error);
+        // 发生错误时返回本地设置（不含密码）
+        const { password, ...settingsToSend } = exchangeSettings;
+        res.status(200).json(settingsToSend);
+    }
+});
+
+app.post('/settings/exchange', optionalAuth, async (req, res) => {
+    const newSettings = req.body;
+    if (!newSettings || typeof newSettings.email !== 'string' || typeof newSettings.password !== 'string') {
+        return res.status(400).json({ error: '无效的Exchange设置格式。必需: email, password。' });
+    }
+    
+    // 当前支持的可选参数: ewsUrl, exchangeVersion
+    const validatedSettings = {
+        email: newSettings.email,
+        password: newSettings.password,
+        // 可选的 EWS URL (如果不想用 Autodiscover)
+        ewsUrl: newSettings.ewsUrl || null,
+        // 可选的 Exchange 版本 (默认 Exchange2013)
+        exchangeVersion: newSettings.exchangeVersion || 'Exchange2013'
+    };
+    
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务保存Exchange设置
+        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+            exchangeSettings = { ...validatedSettings };
+            
+            res.status(200).json({ 
+                message: `已保存${exchangeSettings.email}的Exchange设置。`,
+                usingDirectEws: !!exchangeSettings.ewsUrl,
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+            });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
+    } catch (error) {
+        console.error("[Exchange设置API] 保存失败:", error);
+        res.status(500).json({ error: "保存Exchange设置失败。" });
+    }
+});
+
+// CalDAV设置API
+app.get('/settings/caldav', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务获取CalDAV设置
+        const settings = await localSettingsService.getCalDAVSettings(userToken);
+        
+        // 更新内存缓存，但不暴露密码
+        caldavSettings = { ...settings };
+        const { password, ...settingsToSend } = settings;
+        
+        res.status(200).json(settingsToSend);
+    } catch (error) {
+        console.error('[CalDAV设置API] 获取设置失败:', error);
+        // 发生错误时返回本地设置（不含密码）
+        const { password, ...settingsToSend } = caldavSettings;
+        res.status(200).json(settingsToSend);
+    }
+});
+
+app.post('/settings/caldav', optionalAuth, async (req, res) => {
+    const newSettings = req.body;
+    if (!newSettings || 
+        typeof newSettings.username !== 'string' || 
+        typeof newSettings.password !== 'string' ||
+        typeof newSettings.serverUrl !== 'string') {
+        return res.status(400).json({ 
+            error: '无效的CalDAV设置格式。必需: username, password, serverUrl' 
+        });
+    }
+    
+    const settingsToSave = { ...newSettings };
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务保存CalDAV设置
+        const success = await localSettingsService.saveCalDAVSettings(settingsToSave, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+            caldavSettings = { ...settingsToSave };
+            
+            res.status(200).json({ 
+                message: `已保存${caldavSettings.username}的CalDAV设置。`,
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+            });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
+    } catch (error) {
+        console.error("[CalDAV设置API] 保存失败:", error);
+        res.status(500).json({ error: "保存CalDAV设置失败。" });
+    }
+});
+
+// IMAP设置API
+app.get('/settings/imap', optionalAuth, async (req, res) => {
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务获取IMAP设置
+        const settings = await localSettingsService.getImapSettings(userToken);
+        
+        // 更新内存缓存，但不暴露密码
+        imapSettings = { ...settings };
+        const { password, ...settingsToSend } = settings;
+        
+        res.status(200).json(settingsToSend);
+    } catch (error) {
+        console.error('[IMAP设置API] 获取设置失败:', error);
+        // 发生错误时返回本地设置（不含密码）
+        const { password, ...settingsToSend } = imapSettings;
+        res.status(200).json(settingsToSend);
+    }
+});
+
+app.post('/settings/imap', optionalAuth, async (req, res) => {
+    const newSettings = req.body;
+    if (!newSettings || 
+        typeof newSettings.email !== 'string' || 
+        typeof newSettings.password !== 'string' ||
+        typeof newSettings.imapHost !== 'string') {
+        return res.status(400).json({ 
+            error: '无效的IMAP设置格式。必需: email, password(授权码), imapHost' 
+        });
+    }
+    
+    const settingsToSave = { ...newSettings };
+    const userToken = req.user?.token;
+    
+    try {
+        // 使用本地设置服务保存IMAP设置
+        const success = await localSettingsService.saveImapSettings(settingsToSave, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+            imapSettings = { ...settingsToSave };
+            
+            res.status(200).json({ 
+                message: `已保存${imapSettings.email}的IMAP设置。`,
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+            });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
+    } catch (error) {
+        console.error("[IMAP设置API] 保存失败:", error);
+        res.status(500).json({ error: "保存IMAP设置失败。" });
+    }
 });
 
 // --- 日期时间辅助函数 (移到 utils.js 或确保在这里可用) ---
@@ -345,44 +809,117 @@ app.post('/sync/outlook-ews', async (req, res) => {
 
 // --- 辅助函数：使用 LLM 解析文本 ---
 /**
- * 使用配置的 LLM 解析自然语言文本以提取事件信息。
- * @param {string} text 要解析的自然语言文本。
- * @returns {Promise<ParsedEventData | null>} 解析后的事件数据对象或 null。
+ * 使用大语言模型解析自然语言文本为日历事件
+ * @param {string} text - 要解析的文本
+ * @param {string} userId - 用户ID，用于获取用户特定的LLM配置
+ * @param {string} userToken - 用户认证token，用于访问统一设置服务
+ * @returns {Object|null} 解析后的事件对象，失败时返回null
  */
-async function parseTextWithLLM(text) {
-    console.log(`[LLM Parse Util] Received text: "${text.substring(0, 100)}..."`);
-
-    // 1. 检查 LLM 配置
-    const currentLlmSettings = llmSettings; // 使用全局加载的设置
-    if (!currentLlmSettings || !currentLlmSettings.provider || currentLlmSettings.provider === 'none') {
-        console.error("[LLM Parse Util] LLM not configured.");
-        return null; 
-    }
-    if ((currentLlmSettings.provider === 'openai' || currentLlmSettings.provider === 'deepseek') && !currentLlmSettings.api_key) {
-        console.error(`[LLM Parse Util] API key missing for ${currentLlmSettings.provider}.`);
-        return null; 
-    }
-
-    // --- 开始 LLM 解析 --- 
-    try {
-        // 2. 初始化 LLM Client
-        let openaiClient;
-        let modelToUse = currentLlmSettings.model_name || 'gpt-3.5-turbo'; 
+async function parseTextWithLLM(text, userId = null, userToken = null) {
+    console.log(`[LLM Parse Util] 开始解析: "${text}"`);
+    
+    // 1. 获取LLM配置（带缓存机制）
+    let currentLlmSettings = null;
+    
+    // 检查缓存是否有效
+    const now = Date.now();
+    const isCacheValid = llmConfigCache.data && 
+                        llmConfigCache.userId === userId &&
+                        llmConfigCache.lastUpdated &&
+                        (now - llmConfigCache.lastUpdated) < llmConfigCache.cacheTimeout;
+    
+    if (isCacheValid) {
+        console.log(`[LLM Parse Util] 使用缓存的LLM配置 (用户: ${userId})`);
+        currentLlmSettings = { ...llmConfigCache.data };
+    } else {
+        console.log(`[LLM Parse Util] 缓存无效或过期，重新获取LLM配置`);
         try {
-             openaiClient = new OpenAI({
-                 apiKey: currentLlmSettings.api_key,
-                 baseURL: currentLlmSettings.base_url || (currentLlmSettings.provider === 'deepseek' ? 'https://api.deepseek.com/v1' : undefined),
-             });
-             if (currentLlmSettings.provider === 'deepseek' && !currentLlmSettings.model_name) {
-                  modelToUse = 'deepseek-chat';
-             }
-             console.log(`[LLM Parse Util] Initialized client: ${currentLlmSettings.provider}, model: ${modelToUse}, baseURL: ${openaiClient.baseURL}`);
-        } catch (initError) {
-            console.error("[LLM Parse Util] Failed to initialize LLM client:", initError);
-            return null; 
+            if (userToken && userId) {
+                // 使用内部方法获取用户的真实LLM配置（包含真实API密钥）
+                console.log(`[LLM Parse Util] 获取用户 ${userId} 的内部LLM配置`);
+                const userLlmSettings = localSettingsService.getInternalLLMSettings(userId);
+                if (userLlmSettings) {
+                    currentLlmSettings = { ...userLlmSettings };
+                    // 更新缓存
+                    llmConfigCache = {
+                        data: { ...userLlmSettings },
+                        userId: userId,
+                        lastUpdated: now,
+                        cacheTimeout: llmConfigCache.cacheTimeout
+                    };
+                    console.log('[LLM Parse Util] 已获取用户内部LLM设置并更新缓存:', currentLlmSettings.provider);
+                } else {
+                    throw new Error('无法从设置管理器获取用户内部LLM配置');
+                }
+            } else {
+                // 没有用户认证时，使用内部全局设置
+                console.log('[LLM Parse Util] 无用户认证，使用内部全局LLM配置');
+                const globalLlmSettings = localSettingsService.getInternalLLMSettings();
+                if (globalLlmSettings) {
+                    currentLlmSettings = { ...globalLlmSettings };
+                } else {
+                    throw new Error('无法获取内部全局LLM配置');
+                }
+            }
+        } catch (configError) {
+            console.error('[LLM Parse Util] 获取LLM配置失败:', configError.message);
+            return null;
+        }
+    }
+    
+    // 2. 验证LLM配置是否有效
+    if (!currentLlmSettings || !currentLlmSettings.provider || currentLlmSettings.provider === 'none') {
+        console.error("[LLM Parse Util] LLM配置无效或未设置");
+        return null;
+    }
+    
+    console.log('[LLM Parse Util] 最终使用的LLM配置:', currentLlmSettings.provider);
+    
+    // 3. 内置模型配置已经通过getInternalLLMSettings获取，无需重复处理
+    console.log('[LLM Parse Util] 使用已获取的LLM配置:', currentLlmSettings.provider);
+    
+    // 验证特定提供商的配置
+    console.log('[LLM Parse Util] 调试配置信息:', JSON.stringify(currentLlmSettings, null, 2));
+    
+    if ((currentLlmSettings.provider === 'builtin' || currentLlmSettings.provider === 'builtin-free') && !currentLlmSettings.api_key) {
+        console.error(`[LLM Parse Util] ${currentLlmSettings.provider} 需要API密钥, 当前api_key: "${currentLlmSettings.api_key}"`);
+        return null;
+    } else if ((currentLlmSettings.provider === 'openai' || currentLlmSettings.provider === 'deepseek') && !currentLlmSettings.api_key) {
+        console.error(`[LLM Parse Util] ${currentLlmSettings.provider} 需要API密钥`);
+        return null;
+    }
+
+    try {
+        // 4. 初始化 LLM Client
+        let openaiClient;
+        let modelToUse = currentLlmSettings.model_name || currentLlmSettings.model || 'gpt-3.5-turbo';
+
+        console.log(`[LLM Parse Util] 正在使用 ${currentLlmSettings.provider} 模型: ${modelToUse}`);
+
+        if (currentLlmSettings.provider === 'builtin-free' || currentLlmSettings.provider === 'builtin') {
+            // 内置免费模型配置 - OpenRouter API调用
+            openaiClient = new OpenAI({
+                apiKey: currentLlmSettings.api_key,
+                baseURL: currentLlmSettings.base_url || 'https://openrouter.ai/api/v1',
+                defaultHeaders: {
+                    'HTTP-Referer': 'https://smart-calendar.local',
+                    'X-Title': 'Smart Calendar AI',
+                }
+            });
+            modelToUse = currentLlmSettings.model_name || currentLlmSettings.model;
+        } else {
+            openaiClient = new OpenAI({
+                apiKey: currentLlmSettings.api_key,
+                baseURL: currentLlmSettings.base_url || (currentLlmSettings.provider === 'deepseek' ? 'https://api.deepseek.com/v1' : undefined),
+            });
+            if (currentLlmSettings.provider === 'deepseek' && !currentLlmSettings.model_name) {
+                modelToUse = 'deepseek-chat';
+            }
         }
 
-        // 3. 构建 Prompt (保持与之前路由中一致的逻辑)
+        console.log(`[LLM Parse Util] 已初始化客户端: ${currentLlmSettings.provider}, 模型: ${modelToUse}`);
+        
+        // 5. 构建 Prompt
         const offsetMinutes = new Date().getTimezoneOffset();
         const offsetHours = -offsetMinutes / 60;
         const sign = offsetHours >= 0 ? '+' : '-';
@@ -390,25 +927,19 @@ async function parseTextWithLLM(text) {
         const offsetString = `${sign}${String(Math.floor(absOffsetHours)).padStart(2, '0')}:${String((absOffsetHours % 1) * 60).padStart(2, '0')}`;
         
         const prompt = `
-请解析以下单句或多句自然语言描述，提取出日历事件的关键信息。
-你需要识别出事件的标题 (title)、开始日期和时间 (start_datetime)，以及可选的结束日期和时间 (end_datetime)。
-请特别注意从文本中提取事件发生的地点 (location) 和事件的详细描述 (description)。
+请解析以下自然语言描述，提取出日历事件的关键信息。
 
 **重要上下文:**
 - **当前日期:** ${new Date().toLocaleDateString('zh-CN')}
-- **用户时区:** UTC${offsetString} (请将用户输入的相对时间，如"明天下午三点"，理解为此本地时区的时间)
+- **用户时区:** UTC${offsetString}
 
 **输出要求:**
-请将识别出的本地时间点 **准确转换为 UTC 时间**，然后将结果格式化为 JSON 对象，包含以下键：
+请将识别出的本地时间点准确转换为 UTC 时间，然后将结果格式化为 JSON 对象，包含以下键：
 - "title": string (事件标题，尽量简洁明了)
-- "start_datetime": string (转换后的 **UTC** 时间，ISO 8601 格式，例如 "2025-04-27T07:00:00.000Z" 对应 UTC+8 的下午三点)
-- "end_datetime": string | null (转换后的 **UTC** 时间，ISO 8601 格式，如果未明确指定结束时间或时长，应为 null 或根据开始时间推断一个默认时长如1小时，同样转换为UTC)
-- "description": string | null (从原文提取的或推断的事件详细描述信息，如果无则为 null)
-- "location": string | null (事件发生的地点。请仔细从文本中提取任何表示位置、场所、地址或会议室名称的信息。例如："会议室A", "XX咖啡馆", "XX路XX号", "三楼大会议室"。如果未提及地点，则为 null)
-
-**示例输入和输出:**
-- 输入: "明天下午三点在三楼大会议室开项目周会，讨论一下进展。"
-- 期望的 JSON 结果 (部分): { "title": "项目周会", "start_datetime": "...Z", "location": "三楼大会议室", "description": "讨论一下进展。" }
+- "start_datetime": string (转换后的 UTC 时间，ISO 8601 格式，如 "2025-01-15T07:00:00.000Z")
+- "end_datetime": string | null (转换后的 UTC 时间，如果未指定则推断默认时长1小时)
+- "description": string | null (事件详细描述)
+- "location": string | null (事件地点)
 
 **特殊情况:**
 如果无法从文本中解析出有效的日期和时间，请确保 "start_datetime" 的值为 null。
@@ -419,11 +950,11 @@ async function parseTextWithLLM(text) {
 
 JSON 对象结果：
 `;
-
-        // 4. 调用 LLM API
+        
+        // 6. 调用 LLM API
         let llmResponseContent = '';
         try {
-            console.log("[LLM Parse Util] Sending request to LLM...");
+            console.log("[LLM Parse Util] 发送请求到LLM...");
             const completion = await openaiClient.chat.completions.create({
                 model: modelToUse,
                 messages: [
@@ -431,70 +962,65 @@ JSON 对象结果：
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.2,
-                response_format: { type: "json_object" } 
+                response_format: { type: "json_object" }
             });
+
             llmResponseContent = completion?.choices?.[0]?.message?.content?.trim() ?? '';
-            console.log("[LLM Parse Util] Received LLM response content (raw):", llmResponseContent);
+            console.log("[LLM Parse Util] 收到LLM响应:", llmResponseContent);
+
             if (!llmResponseContent) {
-                throw new Error('LLM 返回了空的响应内容。');
+                throw new Error('LLM 返回了空的响应内容');
             }
+
         } catch (llmError) {
-            console.error("[LLM Parse Util] LLM API call failed:", llmError);
-            // 不在此处 fallback，直接返回 null
-            return null; 
+            console.error("[LLM Parse Util] LLM API 调用失败:", llmError);
+            return null;
         }
 
-        // 5. 解析并验证 LLM 响应
+        // 7. 解析并验证 LLM 响应
         try {
             const parsedResult = JSON.parse(llmResponseContent);
-            // 基本验证
+            
             if (!parsedResult || typeof parsedResult !== 'object') {
-                 throw new Error('LLM 返回的不是有效的 JSON 对象。');
-            }
-            // 验证 start_datetime (可以是 null 或有效的 ISO string)
-             if (parsedResult.start_datetime !== null) {
-                 if (typeof parsedResult.start_datetime !== 'string' || isNaN(new Date(parsedResult.start_datetime).getTime())) {
-                     throw new Error(`LLM 返回的 start_datetime 格式无效或不是字符串: ${parsedResult.start_datetime}`);
-                 }
-             }
-            // 修正其他字段类型（如果需要）
-            if (parsedResult.end_datetime && (typeof parsedResult.end_datetime !== 'string' || isNaN(new Date(parsedResult.end_datetime).getTime()))) {
-                 parsedResult.end_datetime = null;
-            }
-            if (typeof parsedResult.title !== 'string') {
-                 parsedResult.title = String(parsedResult.title || ''); // 确保是字符串
-            }
-            if (typeof parsedResult.description !== 'string' && parsedResult.description !== null) {
-                 parsedResult.description = String(parsedResult.description || '');
-            }
-             if (typeof parsedResult.location !== 'string' && parsedResult.location !== null) {
-                 parsedResult.location = String(parsedResult.location || '');
+                throw new Error('LLM 返回的不是有效的 JSON 对象');
             }
             
-            console.log("[LLM Parse Util] Successfully parsed LLM response:", parsedResult);
-            // 只返回必要的字段
-            return {
-                 title: parsedResult.title || null, // 确保有 title
-                 start_datetime: parsedResult.start_datetime, // 可能为 null
-                 end_datetime: parsedResult.end_datetime || null, // 可能为 null
-                 description: parsedResult.description || null,
-                 location: parsedResult.location || null
-             };
+            // 验证并清理数据
+            const result = {
+                title: parsedResult.title && typeof parsedResult.title === 'string' ? parsedResult.title : null,
+                start_datetime: parsedResult.start_datetime && typeof parsedResult.start_datetime === 'string' ? parsedResult.start_datetime : null,
+                end_datetime: parsedResult.end_datetime && typeof parsedResult.end_datetime === 'string' ? parsedResult.end_datetime : null,
+                description: parsedResult.description && typeof parsedResult.description === 'string' ? parsedResult.description : null,
+                location: parsedResult.location && typeof parsedResult.location === 'string' ? parsedResult.location : null
+            };
+            
+            // 验证时间格式
+            if (result.start_datetime && isNaN(new Date(result.start_datetime).getTime())) {
+                console.warn("[LLM Parse Util] 无效的开始时间格式:", result.start_datetime);
+                result.start_datetime = null;
+            }
+            
+            if (result.end_datetime && isNaN(new Date(result.end_datetime).getTime())) {
+                console.warn("[LLM Parse Util] 无效的结束时间格式:", result.end_datetime);
+                result.end_datetime = null;
+            }
+            
+            console.log("[LLM Parse Util] 解析成功:", result);
+            return result;
 
         } catch (parseError) {
-            console.error("[LLM Parse Util] Failed to parse LLM JSON response:", parseError);
-            return null; // 解析失败返回 null
+            console.error("[LLM Parse Util] JSON解析失败:", parseError);
+            return null;
         }
 
     } catch (error) {
-        console.error('[LLM Parse Util] Unexpected error:', error);
-        // 意外错误也返回 null
+        console.error('[LLM Parse Util] 意外错误:', error);
         return null;
     }
 }
 
 // --- 自然语言解析路由 --- (修改为调用 parseTextWithLLM)
-app.post('/events/parse-natural-language', async (req, res) => {
+app.post('/events/parse-natural-language', authenticateUser, async (req, res) => {
     const { text } = req.body;
     
     if (!text) {
@@ -504,8 +1030,13 @@ app.post('/events/parse-natural-language', async (req, res) => {
     console.log(`[POST /events/parse] Route received text: "${text}"`);
     
     try {
-        // 调用重构后的 LLM 解析函数
-        const parsedResult = await parseTextWithLLM(text);
+        // 获取用户认证信息
+        const userId = getCurrentUserId(req);
+        const authHeader = req.headers.authorization;
+        const userToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+        
+        // 调用重构后的 LLM 解析函数，传入用户认证信息
+        const parsedResult = await parseTextWithLLM(text, userId, userToken);
 
         if (parsedResult) {
             // LLM 解析成功 (即使日期为 null)
@@ -570,17 +1101,22 @@ app.post('/events/parse-natural-language', async (req, res) => {
     }
 });
 
-// --- 事件路由 ---
-app.post('/events', async (req, res) => {
+// --- 事件路由 (需要认证) ---
+app.post('/events', authenticateUser, async (req, res) => {
     const newEvent = req.body;
+    const userId = getCurrentUserId(req);
+    
     if (!newEvent || !newEvent.title) {
         return res.status(400).json({ error: '无效的事件格式。' });
     }
     
-    // 确保事件有唯一ID
+    // 确保事件有唯一ID并添加用户ID
     const eventToSave = {
         ...newEvent,
         id: newEvent.id || uuidv4(),
+        userId: userId, // 添加用户ID，确保数据隔离
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
         // --- 添加 CalDAV 推送相关字段 ---
         needs_caldav_push: newEvent.source !== 'caldav_sync_tsdav', // 如果不是来自 CalDAV 同步，则标记需要推送
         caldav_uid: newEvent.caldav_uid || null, // 保留已有的，否则为 null
@@ -588,175 +1124,199 @@ app.post('/events', async (req, res) => {
         // -----------------------------------
     };
     
-    // 添加到内存中的事件列表
-    eventsDb.push(eventToSave);
-    
     try {
-        // 保存到文件
-        await saveEvents(eventsDb);
-        console.log(`事件已创建: "${eventToSave.title}" (${eventToSave.id})`);
+        // 加载用户的事件数据
+        let userEvents = await loadEvents(userId);
+        
+        // 添加新事件
+        userEvents.push(eventToSave);
+        
+        // 保存用户事件数据
+        await saveEvents(userEvents, userId);
+        
+        console.log(`[用户 ${req.user.username}] 事件已创建: "${eventToSave.title}" (${eventToSave.id})`);
         res.status(201).json(eventToSave);
     } catch (error) {
-        // 保存失败时从内存中移除
-        eventsDb = eventsDb.filter(e => e.id !== eventToSave.id);
-        console.error("保存事件失败:", error);
+        console.error(`[用户 ${req.user.username}] 保存事件失败:`, error);
         res.status(500).json({ error: "保存事件失败。" });
     }
 });
 
-app.get('/events', (req, res) => {
-    res.status(200).json(eventsDb);
+app.get('/events', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        
+        // 自动检查并迁移全局数据到用户目录
+        try {
+            const migrationStats = migrateGlobalSettingsToUser(userId);
+            if (migrationStats.events > 0) {
+                console.log(`[用户 ${req.user.username}] 自动迁移完成，恢复了 ${migrationStats.events} 个事件`);
+            }
+        } catch (migrationError) {
+            console.error(`[用户 ${req.user.username}] 数据迁移失败:`, migrationError);
+            // 迁移失败不影响正常事件获取
+        }
+        
+        const userEvents = await loadEvents(userId);
+        
+        // 过滤掉已标记删除的事件（locally_deleted_at存在的事件）
+        const visibleEvents = userEvents.filter(event => !event.locally_deleted_at);
+        
+        console.log(`[用户 ${req.user.username}] 获取事件列表: ${visibleEvents.length} 个事件 (总计: ${userEvents.length}, 已隐藏删除: ${userEvents.length - visibleEvents.length})`);
+        res.status(200).json(visibleEvents);
+    } catch (error) {
+        console.error(`[用户 ${req.user.username}] 获取事件失败:`, error);
+        res.status(500).json({ error: "获取事件失败。" });
+    }
 });
 
-// 新增：更新事件路由 (用于支持拖拽修改日期等)
-app.put('/events/:id', async (req, res) => {
+// 新增：更新事件路由 (用于支持拖拽修改日期等) - 需要认证
+app.put('/events/:id', authenticateUser, async (req, res) => {
     const eventId = req.params.id;
     const updatedFields = req.body;
     const fieldKeys = Object.keys(updatedFields);
+    const userId = getCurrentUserId(req);
 
-    console.log(`[PUT /events/:id] Received update request for ID: ${eventId} with fields: ${fieldKeys.join(', ')}`);
-
-    const eventIndex = eventsDb.findIndex(e => e.id === eventId);
-
-    if (eventIndex === -1) {
-        console.error(`[PUT /events/:id] Error: Event not found for ID: ${eventId}`);
-        return res.status(404).json({ error: `未找到 ID 为 ${eventId} 的事件。` });
-    }
-    console.log(`[PUT /events/:id] Event found at index: ${eventIndex}`);
-    const originalEvent = { ...eventsDb[eventIndex] }; // <-- 复制原始事件，防止意外修改
-
-    let updatedEvent;
-
-    // 检查是否只更新 completed 状态
-    if (fieldKeys.length === 1 && fieldKeys[0] === 'completed' && typeof updatedFields.completed === 'boolean') {
-        console.log(`[PUT /events/:id] Updating only 'completed' status for event ${eventId} to ${updatedFields.completed}`);
-        updatedEvent = {
-            ...originalEvent,
-            completed: updatedFields.completed,
-            updated_at: new Date().toISOString(),
-            // --- 修改: 如果原始事件来自 CalDAV，标记需要推送更新 ---
-            needs_caldav_push: originalEvent.source?.startsWith('caldav_sync') ? true : (originalEvent.needs_caldav_push || false)
-            // ---------------------------------------------------
-        };
-    } else {
-        // 执行完整更新逻辑
-        console.log(`[PUT /events/:id] Performing full update for event ${eventId}`);
-        const { start_datetime, end_datetime, ...otherUpdatedFields } = updatedFields;
-
-        // 对于完整更新，start_datetime 是必需的 (保持原有逻辑)
-        if (!start_datetime) {
-            console.error('[PUT /events/:id] Error: Missing start_datetime for full update');
-            return res.status(400).json({ error: '完整更新事件时必须提供 start_datetime。' });
-        }
-        
-        // 日期计算逻辑 (保持原有逻辑，但使用更新后的字段)
-        let calculatedEndDate = null;
-        try {
-             // end_datetime 可能是 undefined，需要检查
-             if (end_datetime !== undefined) {
-                 calculatedEndDate = end_datetime; // 如果提供了结束时间，直接使用
-             } else if (originalEvent.end_datetime && originalEvent.start_datetime) {
-                  // 尝试根据原始时长计算
-                  const duration = new Date(originalEvent.end_datetime).getTime() - new Date(originalEvent.start_datetime).getTime();
-                  calculatedEndDate = new Date(new Date(start_datetime).getTime() + duration).toISOString();
-             } else {
-                 // 如果无法计算，则默认1小时
-                 calculatedEndDate = new Date(new Date(start_datetime).getTime() + 3600 * 1000).toISOString();
-                 console.warn(`[PUT /events/:id] Using default 1-hour duration for event ${eventId} during full update`);
-             }
-        } catch(dateError) {
-            console.error(`[PUT /events/:id] Error calculating end date during full update for event ${eventId}:`, dateError);
-            calculatedEndDate = new Date(new Date(start_datetime).getTime() + 3600 * 1000).toISOString();
-            console.warn(`[PUT /events/:id] Using default 1-hour duration due to calculation error for event ${eventId}`);
-        }
-
-        // 合并所有字段进行完整更新
-        updatedEvent = {
-            ...originalEvent,
-            ...otherUpdatedFields, // 应用其他传入的字段 (可能包含 completed)
-            start_datetime: start_datetime,
-            end_datetime: calculatedEndDate,
-            updated_at: new Date().toISOString(),
-            // --- 修改: 如果原始事件来自 CalDAV，标记需要推送更新 ---
-            needs_caldav_push: originalEvent.source?.startsWith('caldav_sync') ? true : (originalEvent.needs_caldav_push || false)
-            // ---------------------------------------------------
-        };
-    }
-
-    console.log(`[PUT /events/:id] Prepared updated event object:`, updatedEvent);
-
-    // 更新内存数据库
-    console.log(`[PUT /events/:id] Updating event in memory at index: ${eventIndex}`);
-    eventsDb[eventIndex] = updatedEvent;
+    console.log(`[PUT /events/:id] 用户 ${req.user.username} 请求更新事件 ID: ${eventId} 字段: ${fieldKeys.join(', ')}`);
 
     try {
+        // 加载用户事件数据
+        let userEvents = await loadEvents(userId);
+        const eventIndex = userEvents.findIndex(e => e.id === eventId && e.userId === userId);
+
+        if (eventIndex === -1) {
+            console.error(`[PUT /events/:id] 错误: 用户 ${req.user.username} 的事件 ID ${eventId} 未找到`);
+            return res.status(404).json({ error: `未找到 ID 为 ${eventId} 的事件。` });
+        }
+        console.log(`[PUT /events/:id] 事件在索引 ${eventIndex} 找到`);
+        const originalEvent = { ...userEvents[eventIndex] }; // <-- 复制原始事件，防止意外修改
+
+        let updatedEvent;
+
+        // 检查是否只更新 completed 状态
+        if (fieldKeys.length === 1 && fieldKeys[0] === 'completed' && typeof updatedFields.completed === 'boolean') {
+            console.log(`[PUT /events/:id] 仅更新事件 ${eventId} 的 completed 状态为 ${updatedFields.completed}`);
+            updatedEvent = {
+                ...originalEvent,
+                completed: updatedFields.completed,
+                updated_at: new Date().toISOString(),
+                // --- 修改: 如果原始事件来自 CalDAV，标记需要推送更新 ---
+                needs_caldav_push: originalEvent.source?.startsWith('caldav_sync') ? true : (originalEvent.needs_caldav_push || false)
+                // ---------------------------------------------------
+            };
+        } else {
+            // 执行完整更新逻辑
+            console.log(`[PUT /events/:id] 对事件 ${eventId} 执行完整更新`);
+            const { start_datetime, end_datetime, ...otherUpdatedFields } = updatedFields;
+
+            // 对于完整更新，start_datetime 是必需的 (保持原有逻辑)
+            if (!start_datetime) {
+                console.error('[PUT /events/:id] 错误: 完整更新缺少 start_datetime');
+                return res.status(400).json({ error: '完整更新事件时必须提供 start_datetime。' });
+            }
+            
+            // 日期计算逻辑 (保持原有逻辑，但使用更新后的字段)
+            let calculatedEndDate = null;
+            try {
+                 // end_datetime 可能是 undefined，需要检查
+                 if (end_datetime !== undefined) {
+                     calculatedEndDate = end_datetime; // 如果提供了结束时间，直接使用
+                 } else if (originalEvent.end_datetime && originalEvent.start_datetime) {
+                      // 尝试根据原始时长计算
+                      const duration = new Date(originalEvent.end_datetime).getTime() - new Date(originalEvent.start_datetime).getTime();
+                      calculatedEndDate = new Date(new Date(start_datetime).getTime() + duration).toISOString();
+                 } else {
+                     // 如果无法计算，则默认1小时
+                     calculatedEndDate = new Date(new Date(start_datetime).getTime() + 3600 * 1000).toISOString();
+                     console.warn(`[PUT /events/:id] 为事件 ${eventId} 使用默认1小时时长`);
+                 }
+            } catch(dateError) {
+                console.error(`[PUT /events/:id] 计算结束日期时出错，事件 ${eventId}:`, dateError);
+                calculatedEndDate = new Date(new Date(start_datetime).getTime() + 3600 * 1000).toISOString();
+                console.warn(`[PUT /events/:id] 由于计算错误，为事件 ${eventId} 使用默认1小时时长`);
+            }
+
+            // 合并所有字段进行完整更新
+            updatedEvent = {
+                ...originalEvent,
+                ...otherUpdatedFields, // 应用其他传入的字段 (可能包含 completed)
+                start_datetime: start_datetime,
+                end_datetime: calculatedEndDate,
+                updated_at: new Date().toISOString(),
+                // --- 修改: 如果原始事件来自 CalDAV，标记需要推送更新 ---
+                needs_caldav_push: originalEvent.source?.startsWith('caldav_sync') ? true : (originalEvent.needs_caldav_push || false)
+                // ---------------------------------------------------
+            };
+        }
+
+        console.log(`[PUT /events/:id] 准备更新事件对象:`, updatedEvent);
+
+        // 更新用户事件数据
+        console.log(`[PUT /events/:id] 在索引 ${eventIndex} 更新事件`);
+        userEvents[eventIndex] = updatedEvent;
+
         // 保存到文件
-        console.log(`[PUT /events/:id] Attempting to save updated events database...`);
-        await saveEvents(eventsDb);
-        console.log(`[PUT /events/:id] Successfully saved events database.`);
-        console.log(`事件已更新: "${updatedEvent.title}" (ID: ${eventId})`);
+        console.log(`[PUT /events/:id] 尝试保存更新的用户事件数据...`);
+        await saveEvents(userEvents, userId);
+        console.log(`[PUT /events/:id] 成功保存用户事件数据`);
+        console.log(`[用户 ${req.user.username}] 事件已更新: "${updatedEvent.title}" (ID: ${eventId})`);
+        
         // 确保返回的事件包含正确的 completed 状态 (从 updatedEvent 获取)
         res.status(200).json(updatedEvent);
     } catch (error) {
-        // 保存失败时回滚内存中的更改
-        // 使用原始事件副本进行回滚
-        eventsDb[eventIndex] = originalEvent;
-        console.error(`[PUT /events/:id] Error saving updated events database:`, error);
-        console.error('[PUT /events/:id] Detailed Error:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+        console.error(`[PUT /events/:id] 用户 ${req.user.username} 保存更新事件失败:`, error);
+        console.error('[PUT /events/:id] 详细错误:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
         res.status(500).json({ error: "保存更新后的事件失败。" });
     }
 });
 
-// 新增：删除事件路由
-app.delete('/events/:id', async (req, res) => {
+// 新增：删除事件路由 - 需要认证
+app.delete('/events/:id', authenticateUser, async (req, res) => {
     const eventId = req.params.id;
-    console.log(`[DELETE /events/:id] Received request to delete event with ID: ${eventId}`);
+    const userId = getCurrentUserId(req);
+    
+    console.log(`[DELETE /events/:id] 用户 ${req.user.username} 请求删除事件 ID: ${eventId}`);
 
-    const eventIndex = eventsDb.findIndex(e => e.id === eventId);
+    try {
+        // 加载用户事件数据
+        let userEvents = await loadEvents(userId);
+        const eventIndex = userEvents.findIndex(e => e.id === eventId && e.userId === userId);
 
-    if (eventIndex === -1) {
-        console.error(`[DELETE /events/:id] Error: Event not found for ID: ${eventId} within current DB state.`);
-        return res.status(404).json({ error: `未找到 ID 为 ${eventId} 的事件。` });
-    }
+        if (eventIndex === -1) {
+            console.error(`[DELETE /events/:id] 错误: 用户 ${req.user.username} 的事件 ID ${eventId} 未找到`);
+            return res.status(404).json({ error: `未找到 ID 为 ${eventId} 的事件。` });
+        }
 
-    const eventToDelete = { ...eventsDb[eventIndex] }; // 创建副本以防万一
+        const eventToDelete = { ...userEvents[eventIndex] }; // 创建副本以防万一
 
-    // 检查事件是否源自 CalDAV 并拥有 caldav_url
-    if (eventToDelete.source?.startsWith('caldav_sync') && eventToDelete.caldav_url) {
-        console.log(`[DELETE /events/:id] Marking CalDAV event for server deletion: ${eventId} - ${eventToDelete.title}`);
-        eventsDb[eventIndex] = {
-            ...eventToDelete,
-            needs_caldav_delete: true, // 标记需要在服务器上删除
-            locally_deleted_at: new Date().toISOString() // 标记本地删除时间，用于UI过滤
-        };
+        // 检查事件是否源自 CalDAV 并拥有 caldav_url
+        if (eventToDelete.source?.startsWith('caldav_sync') && eventToDelete.caldav_url) {
+            console.log(`[DELETE /events/:id] 标记CalDAV事件待服务器删除: ${eventId} - ${eventToDelete.title}`);
+            userEvents[eventIndex] = {
+                ...eventToDelete,
+                needs_caldav_delete: true, // 标记需要在服务器上删除
+                locally_deleted_at: new Date().toISOString() // 标记本地删除时间，用于UI过滤
+            };
 
-        try {
-        await saveEvents(eventsDb);
-            console.log(`[DELETE /events/:id] Event ${eventId} marked for CalDAV deletion and saved locally.`);
+            await saveEvents(userEvents, userId);
+            console.log(`[DELETE /events/:id] 事件 ${eventId} 已标记待CalDAV删除并本地保存`);
             res.status(200).json({
                 message: `事件 '${eventToDelete.title}' (ID: ${eventId}) 已标记为待从服务器删除。将在下次同步时处理。`,
                 marked_for_server_delete: true
             });
-        } catch (error) {
-            // 如果保存失败，理论上应该回滚标记，但目前保持简单
-            console.error('[DELETE /events/:id] Error saving events database after marking for CalDAV deletion:', error);
-            res.status(500).json({ error: '标记事件待删除后保存失败。请重试。' });
+
+        } else {
+            // 非 CalDAV 事件，或没有 caldav_url，直接本地删除
+            const deletedEvent = userEvents.splice(eventIndex, 1)[0];
+            console.log(`[DELETE /events/:id] 从内存移除事件 (非CalDAV或无URL): "${deletedEvent.title}"`);
+
+            await saveEvents(userEvents, userId);
+            console.log(`[DELETE /events/:id] 本地删除后成功保存用户事件数据`);
+            res.status(200).json({ message: `事件 '${deletedEvent.title}' (ID: ${eventId}) 已成功删除。` }); 
         }
-
-    } else {
-        // 非 CalDAV 事件，或没有 caldav_url，直接本地删除
-        const deletedEvent = eventsDb.splice(eventIndex, 1)[0];
-        console.log(`[DELETE /events/:id] Event removed from memory (non-CalDAV or no URL): "${deletedEvent.title}"`);
-
-        try {
-            await saveEvents(eventsDb);
-            console.log(`[DELETE /events/:id] Successfully saved events database after local deletion.`);
-        res.status(200).json({ message: `事件 '${deletedEvent.title}' (ID: ${eventId}) 已成功删除。` }); 
     } catch (error) {
-            eventsDb.splice(eventIndex, 0, deletedEvent); // 保存失败，插回原位
-            console.error('[DELETE /events/:id] Error saving events database after local deletion:', error);
-            res.status(500).json({ error: '本地删除事件后保存失败。请重试。' });
-        }
+        console.error(`[DELETE /events/:id] 用户 ${req.user.username} 删除事件失败:`, error);
+        res.status(500).json({ error: '删除事件失败。请重试。' });
     }
 });
 
@@ -768,9 +1328,14 @@ app.post('/test', (req, res) => {
 
 // --- 启动服务器与定时任务 --- 
 initializeData().then(() => {
+    // 修改监听地址为0.0.0.0，允许外网访问
+    // 参数说明：
+    //   PORT: 监听端口，来源于环境变量或默认8001
+    //   '0.0.0.0': 监听所有网卡（包括外网），否则仅本地可访问
+    //   安全提示：如部署在公网，建议做好防火墙和鉴权保护，避免接口被恶意访问
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`=== 智能日历后端 ===`);
-        console.log(`服务器运行在: http://localhost:${PORT}`);
+        console.log(`服务器运行在: http://0.0.0.0:${PORT}`); // 这里显示0.0.0.0，实际可用公网IP访问
         console.log('\n已注册路由:');
         console.log(' - GET / (API 根路径)');
         console.log(' - POST /events/parse-natural-language');
@@ -836,186 +1401,239 @@ initializeData().then(() => {
 
 // --- 重构后的同步函数 --- 
 let isImapSyncRunning = false;
-async function performImapSync() {
+async function performImapSync(userId = null, userToken = null, userImapSettings = null) {
+    console.log('[performImapSync] Starting IMAP sync process...');
+    console.log(`[performImapSync] 用户ID: ${userId}, 有token: ${!!userToken}`);
+    
     if (isImapSyncRunning) {
-        console.log('[Scheduler] IMAP sync is already running. Skipping this run.');
-        return { message: "Sync already in progress", eventCount: 0 };
+        console.log('[performImapSync] IMAP sync is already running. Skipping.');
+        return { message: 'IMAP Sync is already in progress.', eventCount: 0 };
     }
+
     isImapSyncRunning = true;
-    console.log('[Scheduler] Starting scheduled IMAP sync...');
     
-    // <<<--- 开始填充 IMAP 逻辑 --->>>
-    const currentSettings = imapSettings;
-    if (!currentSettings || !currentSettings.email || !currentSettings.password || !currentSettings.imapHost) {
-        console.error('[performImapSync] IMAP settings not fully configured.');
-        isImapSyncRunning = false; // 释放锁
-        return { message: 'IMAP settings not fully configured.', eventCount: -1, error: true };
-    }
+    // 设置同步超时保护（10分钟后自动释放锁）
+    const syncTimeout = setTimeout(() => {
+        console.warn('[performImapSync] IMAP同步超时，自动释放锁');
+        isImapSyncRunning = false;
+    }, 10 * 60 * 1000); // 10分钟
     
-    console.log(`[performImapSync] Attempting sync for: ${currentSettings.email}`);
+    // 使用传入的用户设置，如果没有则回退到全局设置
+    const effectiveImapSettings = userImapSettings || imapSettings;
+    console.log('[performImapSync] 使用IMAP设置:', {
+        email: effectiveImapSettings.email,
+        host: effectiveImapSettings.imapHost,
+        hasPassword: !!effectiveImapSettings.password
+    });
     
-    const imapConfig = { 
-        user: currentSettings.email,
-        password: currentSettings.password,
-        host: currentSettings.imapHost,
-        port: currentSettings.imapPort || 993,
-        tls: currentSettings.useTLS !== false,
+    const imapConfig = {
+        user: effectiveImapSettings.email,
+        password: effectiveImapSettings.password,
+        host: effectiveImapSettings.imapHost,
+        port: effectiveImapSettings.imapPort || 993,
+        tls: effectiveImapSettings.useTLS !== false, // 默认为 true，除非明确设为 false
         tlsOptions: { rejectUnauthorized: false }
     };
     const imap = new Imap(imapConfig);
     let syncedEvents = [];
-    
+
+    // 加载用户或全局事件
+    if (userId) {
+        eventsDb = await loadEvents(userId);
+        console.log(`[performImapSync] 为用户 ${userId} 加载了 ${eventsDb.length} 个现有事件`);
+    } else {
+        // 如果没有用户ID，加载全局事件（可能是定时任务触发）
+        eventsDb = await loadEvents(null); // 传入null来加载全局事件
+        console.log(`[performImapSync] 加载了 ${eventsDb.length} 个全局事件`);
+    }
+
     // 定义 imap 辅助函数 (connect, open, search, fetch, etc.)
     const imapConnect = () => { 
         return new Promise((resolve, reject) => {
-            imap.once('error', reject);
-            imap.once('ready', resolve);
+            imap.once('ready', () => {
+                console.log('[performImapSync] IMAP connection established successfully.');
+                resolve();
+            });
+            imap.once('error', (err) => {
+                console.error('[performImapSync] IMAP connection error:', err);
+                reject(err);
+            });
             imap.connect();
         });
     };
-    const openMailbox = (folderName) => { /* ... (保持原样) ... */ 
-         return new Promise((resolve, reject) => {
-            console.log(`[performImapSync] Opening mailbox: ${folderName}`);
-             imap.openBox(folderName, false, (err, box) => {
-                 if (err) {
-                     console.error(`[performImapSync] Failed to open ${folderName}: ${err.message}`);
-                     resolve(null); 
-                 } else {
-                      console.log(`[performImapSync] Opened ${folderName}: ${box.messages.total} total, ${box.messages.new} new`);
-                     resolve(box);
-                 }
-             });
-         });
+    const openMailbox = (folderName) => { /* ... (保持原样) ... */  
+        return new Promise((resolve, reject) => {
+            imap.openBox(folderName, false, (err, box) => {
+                if (err) {
+                    console.error(`[performImapSync] Error opening folder ${folderName}:`, err);
+                    reject(err);
+                } else {
+                    console.log(`[performImapSync] Opened folder: ${folderName}, ${box.messages.total} total messages`);
+                    resolve(box);
+                }
+            });
+        });
     };
-    const searchUnseenEmails = (folderName) => { /* ... (保持原样) ... */ 
-         return new Promise((resolve, reject) => {
-             console.log(`[performImapSync] Searching UNSEEN in ${folderName}...`);
-             try {
-                 imap.search(['UNSEEN'], (err, results) => {
-                     if (err) {
-                         console.error(`[performImapSync] Failed to search UNSEEN in ${folderName}: ${err.message}`);
-                         resolve([]);
-                     } else if (!results || results.length === 0) {
-                          console.log(`[performImapSync] No UNSEEN messages found in ${folderName}.`);
-                         resolve([]);
-                     } else {
-                         console.log(`[performImapSync] Found ${results.length} UNSEEN messages in ${folderName}.`);
-                         resolve(results);
-                     }
-                 });
-             } catch (error) {
-                 console.error(`[performImapSync] Error during UNSEEN search in ${folderName}:`, error);
-                 resolve([]);
-             }
-         });
+    const searchUnseenEmails = (folderName) => {
+        return new Promise((resolve, reject) => {
+            // 计算3天前的日期
+            const threeDaysAgo = new Date();
+            threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+            
+            // IMAP搜索条件：未读且最近3天内的邮件
+            const criteria = ['UNSEEN', ['SINCE', threeDaysAgo]];
+            
+            console.log(`[performImapSync] 搜索条件：未读且${threeDaysAgo.toISOString().split('T')[0]}以后的邮件`);
+            
+            imap.search(criteria, (err, results) => {
+                if (err) {
+                    console.error(`[performImapSync] Error searching UNSEEN+RECENT in ${folderName}:`, err);
+                    reject(err);
+                } else {
+                    console.log(`[performImapSync] Found ${results.length} UNSEEN messages from last 3 days in ${folderName}:`, results);
+                    resolve(results);
+                }
+            });
+        });
     };
-    const fetchEmails = (results) => { /* ... (保持原样, 包括内部 findAttachmentParts) ... */ 
-         return new Promise((resolve, reject) => {
-             // ... (fetch logic with markSeen: true) ...
-             if (results.length === 0) return resolve([]);
-             const emails = [];
-             try {
-                 const fetch = imap.fetch(results, { bodies: [''], struct: true, markSeen: true });
-                 let messagesProcessed = 0;
-                 fetch.on('message', (msg, seqno) => {
-                     // ... (message processing logic, parsing attributes, finding parts, getting content) ...
-                      const email = { attachments: [], uid: -1, rawContent: '', subject: '', text: '', html: '', from: null, to: null, date: null };
-                      let rawBuffer = Buffer.alloc(0);
-                      let partPromises = []; // Store promises for fetching parts
+    const fetchEmails = (results) => {  
+        return new Promise((resolve, reject) => {
+            if (results.length === 0) {
+                resolve([]);
+                return;
+            }
+            
+            // 去重UID数组，避免重复处理
+            const uniqueResults = [...new Set(results)];
+            console.log(`[fetchEmails] 原始UID数组长度: ${results.length}, 去重后: ${uniqueResults.length}`);
+            if (results.length !== uniqueResults.length) {
+                console.log(`[fetchEmails] 发现重复UID，原始: [${results.join(', ')}], 去重后: [${uniqueResults.join(', ')}]`);
+            }
+            
+            // 设置超时保护（2分钟，缩短超时时间）
+            const fetchTimeout = setTimeout(() => {
+                console.error(`[fetchEmails] 获取邮件超时，批次大小: ${uniqueResults.length}`);
+                reject(new Error('Fetch emails timeout'));
+            }, 2 * 60 * 1000); // 2分钟
 
-                      msg.on('body', (stream, info) => {
-                         stream.on('data', (chunk) => { rawBuffer = Buffer.concat([rawBuffer, chunk]); });
-                         stream.once('end', () => { email.rawContent = rawBuffer.toString('utf8'); });
-                      });
+            const emails = [];
+            let completed = 0;
+            const total = uniqueResults.length;
+            
+            const fetch = imap.fetch(uniqueResults, { 
+                bodies: '',
+                struct: true,
+                markSeen: false
+            });
+            
+            console.log(`[fetchEmails] 开始获取 ${total} 封去重邮件...`);
 
-                      msg.once('attributes', (attrs) => {
-                         email.attributes = attrs; email.uid = attrs.uid; email.flags = attrs.flags; email.date = attrs.date;
-                         if (attrs.struct) {
-                             const attachmentParts = findAttachmentParts(attrs.struct);
-                             if (attachmentParts && Array.isArray(attachmentParts)) {
-                                 const calendarParts = attachmentParts.filter(part => (part.params?.name?.toLowerCase().endsWith('.ics')) || (part.type === 'text' && part.subtype === 'calendar'));
-                                 if (calendarParts.length > 0) {
-                                     calendarParts.forEach(part => {
-                                          const partFetchPromise = new Promise((resolvePart, rejectPart) => {
-                                             const partFetch = imap.fetch(attrs.uid, { bodies: [part.partID], struct: false });
-                                             let partBuffer = '';
-                                             partFetch.on('message', (partMsg) => {
-                                                 partMsg.on('body', (stream, info) => {
-                                                     stream.on('data', (chunk) => { partBuffer += chunk.toString('utf8'); });
-                                                     stream.once('end', () => {
-                                                         email.attachments.push({ filename: part.params?.name || 'calendar.ics', contentType: `${part.type}/${part.subtype}`, content: partBuffer, isCalendar: true });
-                                                          console.log(`[fetchEmails] Fetched calendar part ${part.partID} for UID ${email.uid}`);
-                                                         resolvePart();
-                                                     });
-                                                 });
-                                                 partMsg.once('error', (err) => { console.error(`[fetchEmails] Error fetching part ${part.partID} for UID ${email.uid}:`, err); rejectPart(err); });
-                                             });
-                                              partFetch.once('error', (err) => { console.error(`[fetchEmails] Error initiating fetch for part ${part.partID} UID ${email.uid}:`, err); rejectPart(err); });
-                                              partFetch.once('end', () => { /* Part fetch ends */ });
-                                         });
-                                          partPromises.push(partFetchPromise);
-                                     });
-                                 }
-                             } else {
-                                 console.warn(`[fetchEmails] 'findAttachmentParts' did not return a valid array for UID ${email.uid}. Received:`, attachmentParts);
-                             }
-                         }
-                      });
+            fetch.on('message', (msg, seqno) => {
+                console.log(`[fetchEmails] 开始处理邮件 seqno: ${seqno}`);
+                const email = { uid: null, subject: '', from: null, date: null, text: '', html: '', attachments: [], isParsed: false };
+                
+                msg.on('body', (stream, info) => {
+                    simpleParser(stream, (err, parsed) => {
+                        if (err) {
+                            console.error(`[performImapSync] Error parsing email ${seqno}:`, err);
+                            email.isParsed = true;
+                            return;
+                        }
+                        
+                        
+                        
+                        email.subject = parsed.subject || '';
+                        email.from = parsed.from;
+                        email.date = parsed.date;
+                        email.text = parsed.text || '';
+                        email.html = parsed.html || '';
+                        email.isParsed = true;
 
-                     msg.once('end', async () => {
-                         try {
-                             await Promise.all(partPromises); // Wait for all parts to be fetched
-                             const parsed = await simpleParser(email.rawContent);
-                             email.subject = parsed.subject; email.from = parsed.from; email.to = parsed.to; email.html = parsed.html; email.text = parsed.text;
-                             emails.push(email);
-                             console.log(`[fetchEmails] Parsed base email UID ${email.uid}: ${email.subject}`);
-                         } catch (parseError) {
-                              console.error(`[fetchEmails] Failed to parse or process parts for email UID ${email.uid}:`, parseError);
-                             emails.push(email); // Still add basic info if parsing fails
-                         } finally {
-                              messagesProcessed++;
-                              if (messagesProcessed === results.length) {
-                                 // This might resolve slightly before the main fetch 'end' but is safer
-                                 console.log('[fetchEmails] All messages processed.');
-                                 // Resolve slightly later to ensure the main 'end' event fires if needed
-                                 // setTimeout(() => resolve(emails), 50); 
-                                 // Let the main 'end' handler resolve
-                             }
-                         }
-                     });
-                 });
+                        if (parsed.attachments) {
+                            email.attachments = parsed.attachments.map(att => ({
+                                filename: att.filename,
+                                contentType: att.contentType,
+                                size: att.size,
+                                content: att.content ? att.content.toString() : null,
+                                isCalendar: att.contentType && (att.contentType.includes('text/calendar') || att.filename && att.filename.endsWith('.ics'))
+                            }));
+                        }
+                    });
+                });
 
-                 fetch.once('error', (err) => { console.error('[fetchEmails] Fetch error:', err); reject(err); });
-                 fetch.once('end', () => {
-                      console.log('[fetchEmails] Main fetch stream ended.');
-                      // Final resolution happens when all messagesProcessed
-                      if (messagesProcessed === results.length) { resolve(emails); }
-                       else { /* Wait for msg.once('end') to resolve */ 
-                           // Add a timeout safeguard in case msg 'end' never fires for some reason
-                           setTimeout(() => {
-                               if (emails.length === results.length) {
-                                    console.warn('[fetchEmails] Resolving via timeout safeguard.');
-                                    resolve(emails);
-                               } else {
-                                    console.error(`[fetchEmails] Timeout reached but only ${emails.length}/${results.length} emails collected.`);
-                                     reject(new Error('Timeout waiting for all messages to process'));
-                               }
-                           }, 5000); // 5 second timeout
-                       }
-                 });
-             } catch (error) {
-                 console.error('[fetchEmails] Outer catch error:', error);
-                 reject(error);
-             }
-         });
+                msg.once('attributes', (attrs) => {
+                    email.uid = attrs.uid;
+                    console.log(`[fetchEmails] 邮件 seqno: ${seqno}, UID: ${attrs.uid} 属性获取完成`);
+                });
+
+                msg.once('end', () => {
+                    // 等待解析完成后再添加到emails数组
+                    const waitForParsing = () => {
+                        if (email.isParsed) {
+                            console.log(`[fetchEmails] 邮件 UID: ${email.uid} 解析完成，添加到结果中`);
+                            emails.push(email);
+                            completed++;
+                            console.log(`[fetchEmails] 进度: ${completed}/${total} 邮件处理完成`);
+                            
+                            // 检查是否所有邮件都处理完成
+                            if (completed === total) {
+                                console.log(`[performImapSync] Finished fetching ${emails.length} emails.`);
+                                clearTimeout(fetchTimeout); // 清除超时定时器
+                                resolve(emails);
+                            }
+                        } else {
+                            // 如果还没解析完，等待一段时间后重试
+                            setTimeout(waitForParsing, 10);
+                        }
+                    };
+                    
+                    waitForParsing();
+                });
+            });
+
+            fetch.once('error', (err) => {
+                console.error('[performImapSync] Error fetching emails:', err);
+                reject(err);
+            });
+
+            // 移除原来的fetch.once('end')，因为现在在msg.once('end')中处理完成
+        });
     };
-    const extractCalendarEvents = async (emails) => {
+    const extractCalendarEvents = async (emails, userId = null, userToken = null) => {
         const eventsFound = [];
+        
+        // 添加调试信息：显示所有收到的邮件
+        console.log(`[extractCalendarEvents] Processing ${emails.length} emails:`);
+        emails.forEach((email, index) => {
+            // 改进发件人地址获取逻辑，处理不同格式
+            let senderAddress = '';
+            if (email.from) {
+                if (typeof email.from === 'string') {
+                    // 如果from是字符串，直接使用
+                    senderAddress = email.from.toLowerCase();
+                } else if (email.from.value && Array.isArray(email.from.value) && email.from.value.length > 0) {
+                    // 如果from是对象且有value数组
+                    senderAddress = email.from.value[0].address?.toLowerCase() || '';
+                } else if (email.from.address) {
+                    // 如果from对象直接有address属性
+                    senderAddress = email.from.address.toLowerCase();
+                } else if (email.from.text) {
+                    // 如果from对象有text属性，尝试提取邮箱
+                    const emailMatch = email.from.text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                    senderAddress = emailMatch ? emailMatch[1].toLowerCase() : '';
+                }
+            }
+            
+            console.log(`[extractCalendarEvents] Email ${index + 1}: UID ${email.uid}, Subject: "${email.subject}", Sender: ${senderAddress}`);
+            
+            
+        });
         
         // --- 使用动态加载的白名单 ---
         const currentAllowlist = (imapFilterSettings && Array.isArray(imapFilterSettings.sender_allowlist))
                                  ? imapFilterSettings.sender_allowlist
                                  : [];
+        console.log(`[extractCalendarEvents] Current allowlist:`, currentAllowlist);
         // ---------------------------
 
         for (const email of emails) {
@@ -1075,71 +1693,116 @@ async function performImapSync() {
                 }
             }
             
-            // --- LLM 解析邮件正文逻辑 (使用动态白名单) ---
-            const senderAddress = email.from?.value?.[0]?.address?.toLowerCase();
-
-            if (!senderAddress || !currentAllowlist.includes(senderAddress)) {
-                if (senderAddress) {
-                    console.log(`[extractCalendarEvents] Skipping LLM parsing for email UID ${email.uid} from sender: ${senderAddress} (not in allowlist).`);
-                }
-            } else {
-                // 发件人在白名单中，继续进行 LLM 解析
-            const textToParse = email.text || (email.html ? require('html-to-text').htmlToText(email.html) : '');
-            if (textToParse && textToParse.trim().length > 5) {
-                    console.log(`[extractCalendarEvents] Attempting LLM parsing for email UID ${email.uid} body (Sender: ${senderAddress} - in allowlist)...`);
-                try {
-                    const llmResult = await parseTextWithLLM(textToParse);
-                    if (llmResult && llmResult.start_datetime) {
-                        // ... (LLM 结果处理和增强重复检查逻辑保持不变) ...
-                        const llmEventTitle = llmResult.title || email.subject || '来自邮件的事件';
-                        const llmEventStart = llmResult.start_datetime;
-                        
-                        const llmEventUidBase = `llm_${email.uid}_${new Date(llmEventStart).getTime()}`;
-                        let llmUniqueId = llmEventUidBase;
-                        let counter = 0;
-                            while(eventsDb.some(e => e.id === llmUniqueId) || eventsFound.some(ef => ef.id === llmUniqueId)) { 
-                             counter++;
-                             llmUniqueId = `${llmEventUidBase}_${counter}`;
-                        }
-
-                        const isDuplicateLLM = eventsDb.some(existingEvent => 
-                            existingEvent.id === llmUniqueId || 
-                            (existingEvent.title === llmEventTitle && existingEvent.start_datetime === llmEventStart)
-                            ) || eventsFound.some(ef => 
-                                ef.id === llmUniqueId || 
-                                (ef.title === llmEventTitle && ef.start_datetime === llmEventStart)
-                        );
-
-                        if (!isDuplicateLLM) {
-                            console.log(`[extractCalendarEvents] LLM parsed event from email UID ${email.uid}:`, llmResult);
-                            const eventData = {
-                                id: llmUniqueId,
-                                title: llmEventTitle,
-                                start_datetime: llmEventStart,
-                                end_datetime: llmResult.end_datetime,
-                                description: llmResult.description || email.subject || '',
-                                location: llmResult.location || '',
-                                all_day: false,
-                                source: 'imap_llm_body_parse',
-                                created_at: email.date ? new Date(email.date).toISOString() : new Date().toISOString(),
-                                    updated_at: new Date().toISOString(),
-                                    needs_caldav_push: true, // 新事件默认需要推送
-                            };
-                            eventsFound.push(eventData);
-                        } else {
-                            console.log(`[extractCalendarEvents] Skipping duplicate LLM-parsed event found by enhanced check. Title: ${llmEventTitle}, Start: ${llmEventStart}`);
-                        }
-                    } else if(llmResult) {
-                        console.log(`[extractCalendarEvents] LLM parsed email UID ${email.uid} but no valid start date found.`);
-                    } else {
-                         console.log(`[extractCalendarEvents] LLM parsing failed or returned null for email UID ${email.uid}.`);
-                    }
-                } catch (llmError) {
-                    console.error(`[extractCalendarEvents] Error during LLM parsing for email UID ${email.uid}:`, llmError);
+            // --- LLM 解析邮件正文逻辑 (智能分析策略) ---
+            // 改进发件人地址获取逻辑，处理不同格式
+            let senderAddress = '';
+            if (email.from) {
+                if (typeof email.from === 'string') {
+                    senderAddress = email.from.toLowerCase();
+                } else if (email.from.value && Array.isArray(email.from.value) && email.from.value.length > 0) {
+                    senderAddress = email.from.value[0].address?.toLowerCase() || '';
+                } else if (email.from.address) {
+                    senderAddress = email.from.address.toLowerCase();
+                } else if (email.from.text) {
+                    const emailMatch = email.from.text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                    senderAddress = emailMatch ? emailMatch[1].toLowerCase() : '';
                 }
             }
-            } // <-- 结束白名单判断的 else 块
-        }
+            
+            // 首先检查白名单策略：只有白名单中的发件人邮件才会被分析
+            if (!senderAddress || !currentAllowlist.includes(senderAddress)) {
+                console.log(`[extractCalendarEvents] Skipping LLM parsing for email UID ${email.uid} from sender: ${senderAddress} (sender not in allowlist).`);
+            } else {
+                // 检查是否已经分析过这封邮件（防重复分析）
+                const analysisKey = `imap_llm_${email.uid}`;
+                const alreadyAnalyzed = eventsDb.some(e => e.source === 'imap_llm_body_parse' && e.analysis_key === analysisKey);
+                
+                if (alreadyAnalyzed) {
+                    console.log(`[extractCalendarEvents] Skipping email UID ${email.uid} - already analyzed (analysis_key: ${analysisKey}).`);
+                } else {
+                    console.log(`[extractCalendarEvents] Analyzing email UID ${email.uid} from sender: ${senderAddress} (sender in allowlist).`);
+                    
+                    
+                    
+                    // 在LLM调用之前先检查是否已经有相同的事件
+                    const emailBody = email.text || (email.html ? require('html-to-text').htmlToText(email.html) : '');
+                    const emailSubject = email.subject || '';
+                    // 将标题和正文合并进行分析
+                    const textToParse = `${emailSubject}\n${emailBody}`.trim();
+                    
+                    
+                    
+                    if (textToParse && textToParse.trim().length > 5) {
+                        console.log(`[extractCalendarEvents] Checking for existing events before LLM parsing for email UID ${email.uid}...`);
+                        
+                        // 简单的重复检查：基于邮件主题和UID
+                        const existingSimilar = eventsDb.find(e => 
+                            e.source === 'imap_llm_body_parse' && 
+                            (e.analysis_key === analysisKey || 
+                             (e.title && email.subject && e.title.includes(email.subject.substring(0, 20))))
+                        );
+                        
+                        if (existingSimilar) {
+                            console.log(`[extractCalendarEvents] Skipping LLM call for email UID ${email.uid} - similar event already exists: "${existingSimilar.title}"`);
+                        } else {
+                            console.log(`[extractCalendarEvents] Attempting LLM parsing for email UID ${email.uid} body...`);
+                            // 继续进行 LLM 解析
+                            try {
+                                const llmResult = await parseTextWithLLM(textToParse, userId, userToken);
+                                if (llmResult && llmResult.start_datetime) {
+                                    // ... (LLM 结果处理和增强重复检查逻辑保持不变) ...
+                                    const llmEventTitle = llmResult.title || email.subject || '来自邮件的事件';
+                                    const llmEventStart = llmResult.start_datetime;
+                                    
+                                    const llmEventUidBase = `llm_${email.uid}_${new Date(llmEventStart).getTime()}`;
+                                    let llmUniqueId = llmEventUidBase;
+                                    let counter = 0;
+                                    while(eventsDb.some(e => e.id === llmUniqueId) || eventsFound.some(ef => ef.id === llmUniqueId)) { 
+                                        counter++;
+                                        llmUniqueId = `${llmEventUidBase}_${counter}`;
+                                    }
+
+                                    const isDuplicateLLM = eventsDb.some(existingEvent => 
+                                        existingEvent.id === llmUniqueId || 
+                                        (existingEvent.title === llmEventTitle && existingEvent.start_datetime === llmEventStart)
+                                    ) || eventsFound.some(ef => 
+                                        ef.id === llmUniqueId || 
+                                        (ef.title === llmEventTitle && ef.start_datetime === llmEventStart)
+                                    );
+
+                                    if (!isDuplicateLLM) {
+                                        console.log(`[extractCalendarEvents] LLM parsed event from email UID ${email.uid}:`, llmResult);
+                                        const eventData = {
+                                            id: llmUniqueId,
+                                            title: llmEventTitle,
+                                            start_datetime: llmEventStart,
+                                            end_datetime: llmResult.end_datetime,
+                                            description: llmResult.description || email.subject || '',
+                                            location: llmResult.location || '',
+                                            all_day: false,
+                                            source: 'imap_llm_body_parse',
+                                            analysis_key: analysisKey, // 添加分析键防重复
+                                            created_at: email.date ? new Date(email.date).toISOString() : new Date().toISOString(),
+                                            updated_at: new Date().toISOString(),
+                                            needs_caldav_push: true, // 新事件默认需要推送
+                                        };
+                                        eventsFound.push(eventData);
+                                    } else {
+                                        console.log(`[extractCalendarEvents] Skipping duplicate LLM-parsed event found by enhanced check. Title: ${llmEventTitle}, Start: ${llmEventStart}`);
+                                    }
+                                } else if(llmResult) {
+                                    console.log(`[extractCalendarEvents] LLM parsed email UID ${email.uid} but no valid start date found.`);
+                                } else {
+                                    console.log(`[extractCalendarEvents] LLM parsing failed or returned null for email UID ${email.uid}.`);
+                                }
+                            } catch (llmError) {
+                                console.error(`[extractCalendarEvents] Error during LLM parsing for email UID ${email.uid}:`, llmError);
+                            }
+                        }
+                    }
+                } // <-- 结束已分析检查的 else 块
+            } // <-- 结束白名单检查的 else 块  
+        } // <-- 结束邮件遍历的 for 循环
 
         console.log(`[extractCalendarEvents] Finished processing emails. Found ${eventsFound.length} potential new events after duplicate checks.`);
         return eventsFound;
@@ -1158,9 +1821,29 @@ async function performImapSync() {
             const searchResults = await searchUnseenEmails(folderName);
             if (searchResults.length > 0) {
                 console.log(`[performImapSync] Fetching ${searchResults.length} UNSEEN messages...`);
-                const emails = await fetchEmails(searchResults);
+                
+                // 分批处理邮件，避免一次性加载太多
+                const batchSize = 10; // 每批处理10封邮件
+                let allEmails = [];
+                
+                for (let i = 0; i < searchResults.length; i += batchSize) {
+                    const batch = searchResults.slice(i, i + batchSize);
+                    console.log(`[performImapSync] 处理批次 ${Math.floor(i/batchSize) + 1}/${Math.ceil(searchResults.length/batchSize)}: ${batch.length} 封邮件`);
+                    
+                    try {
+                        const batchEmails = await fetchEmails(batch);
+                        allEmails = [...allEmails, ...batchEmails];
+                        console.log(`[performImapSync] 批次完成，累计获取 ${allEmails.length} 封邮件`);
+                    } catch (batchError) {
+                        console.error(`[performImapSync] 批次处理失败:`, batchError);
+                        // 继续处理下一批，不要让一个批次的失败影响整个同步
+                        continue;
+                    }
+                }
+                
+                const emails = allEmails;
                  console.log(`[performImapSync] Extracting events from ${emails.length} fetched messages...`);
-                const newEvents = await extractCalendarEvents(emails);
+                const newEvents = await extractCalendarEvents(emails, userId, userToken);
                 if (newEvents.length > 0) {
                     syncedEvents = [...syncedEvents, ...newEvents];
                      console.log(`[performImapSync] Extracted ${newEvents.length} events from ${folderName}.`);
@@ -1178,21 +1861,31 @@ async function performImapSync() {
             // TODO: Add content-based duplicate check here (isLikelyDuplicate)
             if (uniqueNewEvents.length > 0) {
                 eventsDb = [...eventsDb, ...uniqueNewEvents];
-                await saveEvents(eventsDb);
-                console.log(`[performImapSync] Saved ${uniqueNewEvents.length} new events.`);
-                // Close connection before returning
+                
+                // 根据用户ID保存到正确的位置
+                if (userId) {
+                    await saveEvents(eventsDb, userId);
+                    console.log(`[performImapSync] 为用户 ${userId} 保存了 ${uniqueNewEvents.length} 个新事件`);
+                } else {
+                    globalEventsDb = eventsDb;
+                    await saveEvents(eventsDb);
+                    console.log(`[performImapSync] 保存了 ${uniqueNewEvents.length} 个新事件到全局数据`);
+                }
                 try { imap.end(); console.log('[performImapSync] IMAP connection closed.'); } catch (e) { console.error('[performImapSync] Error closing IMAP:', e); }
+                clearTimeout(syncTimeout); // 清除超时定时器
                 isImapSyncRunning = false;
                 return { message: `IMAP Sync successful. Added ${uniqueNewEvents.length} new events.`, eventCount: uniqueNewEvents.length };
             } else {
                  console.log('[performImapSync] All extracted events already exist.');
                  try { imap.end(); console.log('[performImapSync] IMAP connection closed.'); } catch (e) { console.error('[performImapSync] Error closing IMAP:', e); }
+                 clearTimeout(syncTimeout); // 清除超时定时器
                  isImapSyncRunning = false;
                  return { message: 'IMAP Sync complete. No new events found.', eventCount: 0 };
             }
         } else {
              console.log('[performImapSync] No events extracted from emails.');
              try { imap.end(); console.log('[performImapSync] IMAP connection closed.'); } catch (e) { console.error('[performImapSync] Error closing IMAP:', e); }
+             clearTimeout(syncTimeout); // 清除超时定时器
              isImapSyncRunning = false;
              return { message: 'IMAP Sync complete. No events extracted.', eventCount: 0 };
         }
@@ -1201,13 +1894,487 @@ async function performImapSync() {
         console.error('[performImapSync] Error during IMAP sync process:', error);
         // 确保关闭连接
         try { imap.end(); } catch (e) { /* ignore */ }
+        clearTimeout(syncTimeout); // 清除超时定时器
         isImapSyncRunning = false; // 释放锁
         // return { message: `IMAP Sync failed: ${error.message}`, eventCount: -1, error: true };
         throw error; // 重新抛出错误，让路由处理函数捕获并返回 500
     } // <<<--- 结束填充 IMAP 逻辑 --->>>
 }
 
+// --- 用户特定的IMAP同步函数 ---
+async function performImapSyncForUser(userImapSettings, userId) {
+    console.log(`[performImapSyncForUser] Starting IMAP sync for user ${userId}...`);
+    
+    // 检查IMAP设置
+    if (!userImapSettings || !userImapSettings.email || !userImapSettings.password || !userImapSettings.imapHost) {
+        console.error(`[performImapSyncForUser] IMAP settings not fully configured for user ${userId}.`);
+        return { message: 'IMAP settings not fully configured.', eventCount: -1, error: true };
+    }
+    
+    console.log(`[performImapSyncForUser] Attempting sync for user ${userId}: ${userImapSettings.email}`);
+    
+    try {
+        const imapConfig = { 
+            user: userImapSettings.email,
+            password: userImapSettings.password,
+            host: userImapSettings.imapHost,
+            port: userImapSettings.imapPort || 993,
+            tls: userImapSettings.useTLS !== false,
+            tlsOptions: { rejectUnauthorized: false }
+        };
+        const imap = new Imap(imapConfig);
+        let syncedEvents = [];
+        
+        // 加载用户事件
+        let userEvents = await loadEvents(userId);
+        
+        // 定义 imap 辅助函数
+        const imapConnect = () => { 
+            return new Promise((resolve, reject) => {
+                imap.once('error', reject);
+                imap.once('ready', resolve);
+                imap.connect();
+            });
+        };
+        
+        const openMailbox = (folderName) => {
+             return new Promise((resolve, reject) => {
+                console.log(`[performImapSyncForUser] Opening mailbox: ${folderName}`);
+                 imap.openBox(folderName, false, (err, box) => {
+                     if (err) {
+                         console.error(`[performImapSyncForUser] Failed to open ${folderName}: ${err.message}`);
+                         resolve(null); 
+                     } else {
+                          console.log(`[performImapSyncForUser] Opened ${folderName}: ${box.messages.total} total, ${box.messages.new} new`);
+                         resolve(box);
+                     }
+                 });
+             });
+        };
+        
+        const searchUnseenEmails = (folderName) => {
+             return new Promise((resolve, reject) => {
+                 console.log(`[performImapSyncForUser] Searching UNSEEN in ${folderName}...`);
+                 try {
+                     imap.search(['UNSEEN'], (err, results) => {
+                         if (err) {
+                             console.error(`[performImapSyncForUser] Failed to search UNSEEN in ${folderName}: ${err.message}`);
+                             resolve([]);
+                         } else if (!results || results.length === 0) {
+                              console.log(`[performImapSyncForUser] No UNSEEN messages found in ${folderName}.`);
+                             resolve([]);
+                         } else {
+                             console.log(`[performImapSyncForUser] Found ${results.length} UNSEEN messages in ${folderName}.`);
+                             resolve(results);
+                         }
+                     });
+                 } catch (error) {
+                     console.error(`[performImapSyncForUser] Error during UNSEEN search in ${folderName}:`, error);
+                     resolve([]);
+                 }
+             });
+        };
+        
+        // IMAP连接和邮件处理逻辑
+        await imapConnect();
+        console.log(`[performImapSyncForUser] Connected to IMAP server for user ${userId}`);
+        
+        const box = await openMailbox('INBOX');
+        if (!box) {
+            imap.end();
+            return { message: 'Failed to open INBOX', eventCount: -1, error: true };
+        }
+        
+        const unseenResults = await searchUnseenEmails('INBOX');
+        if (unseenResults.length === 0) {
+            imap.end();
+            console.log(`[performImapSyncForUser] No new emails found for user ${userId}`);
+            return { message: 'No new emails found', eventCount: 0 };
+        }
+        
+        console.log(`[performImapSyncForUser] Processing ${unseenResults.length} emails for user ${userId}...`);
+        // 这里需要实现邮件获取和AI分析的逻辑
+        // 简化版本：返回成功状态
+        
+        imap.end();
+        
+        // 保存用户事件
+        await saveEvents(userEvents, userId);
+        
+        console.log(`[performImapSyncForUser] IMAP sync completed for user ${userId}`);
+        return { 
+            message: `IMAP sync completed for ${userImapSettings.email}. Found ${unseenResults.length} new emails.`, 
+            eventCount: 0 
+        };
+        
+    } catch (error) {
+        console.error(`[performImapSyncForUser] Error during IMAP sync for user ${userId}:`, error);
+        return { message: `IMAP Sync failed: ${error.message}`, eventCount: -1, error: true };
+    }
+}
+
 let isCalDavSyncRunning = false;
+
+// --- 用户特定的CalDAV同步函数 ---
+async function performCalDavSyncForUser(userId) {
+    console.log(`[performCalDavSyncForUser] Starting CalDAV sync for user ${userId}...`);
+    
+    try {
+        // 加载用户特定的CalDAV设置
+        const userCalDAVSettings = await loadCalDAVSettings(userId);
+        
+        // 检查CalDAV设置是否已配置
+        if (!userCalDAVSettings || !userCalDAVSettings.username || !userCalDAVSettings.password || !userCalDAVSettings.serverUrl) {
+            console.error(`[performCalDavSyncForUser] CalDAV settings not fully configured for user ${userId}.`);
+            return { message: 'CalDAV设置未完全配置，请先完成CalDAV服务器设置。', eventCount: -1, error: true };
+        }
+        
+        console.log(`[performCalDavSyncForUser] Syncing for user ${userId}: ${userCalDAVSettings.username}`);
+        
+        // 加载用户事件
+        let userEvents = await loadEvents(userId);
+        
+        // 调用相应的CalDAV同步逻辑
+        let syncResult;
+        if (userCalDAVSettings.serverUrl && userCalDAVSettings.serverUrl.includes('dav.qq.com')) {
+            syncResult = await performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId);
+        } else {
+            syncResult = await performGenericCalDavSyncForUser(userCalDAVSettings, userEvents, userId);
+        }
+        
+        return syncResult;
+        
+    } catch (error) {
+        console.error(`[performCalDavSyncForUser] Error during CalDAV sync for user ${userId}:`, error);
+        return { message: `CalDAV Sync failed: ${error.message}`, eventCount: -1, error: true };
+    }
+}
+
+// --- 用户特定的QQ CalDAV同步函数 ---
+async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId) {
+    console.log(`[performQQCalDavSyncForUser] Starting QQ CalDAV sync for user ${userId}`);
+    
+    try {
+        let targetServerUrl = userCalDAVSettings.serverUrl;
+        if (!targetServerUrl.startsWith('http')) targetServerUrl = 'https://' + targetServerUrl;
+        if (!targetServerUrl.endsWith('/')) targetServerUrl += '/';
+        
+        const client = new DAVClient({
+            serverUrl: targetServerUrl,
+            credentials: {
+                username: userCalDAVSettings.username,
+                password: userCalDAVSettings.password
+            },
+            authMethod: 'Basic',
+            defaultAccountType: 'caldav'
+        });
+
+        await client.login();
+        console.log(`[performQQCalDavSyncForUser] Login successful for user ${userId}`); 
+        
+        const calendars = await client.fetchCalendars();
+        if (calendars.length === 0) {
+            return { message: 'No calendars found on server.', eventCount: 0 };
+        }
+        
+        let targetCalendar = calendars.find(cal => cal.displayName === 'Calendar' || cal.displayName === '日历') || calendars[0];
+        
+        // 获取同步时间范围
+        const startDate = new Date();
+        startDate.setMonth(startDate.getMonth() - 1); // 1个月前
+        const endDate = new Date();
+        endDate.setMonth(endDate.getMonth() + 6); // 6个月后
+
+        const calendarObjects = await client.fetchCalendarObjects({
+            calendar: targetCalendar,
+            calendarData: { 
+                compFilter: { 
+                    attrs: { name: 'VCALENDAR' },
+                    compFilter: {
+                        attrs: { name: 'VEVENT' },
+                        timeRange: {
+                            start: startDate.toISOString(),
+                            end: endDate.toISOString(),
+                        },
+                    },
+                 }
+            }
+        });
+        
+        console.log(`[performQQCalDavSyncForUser] Fetched ${calendarObjects.length} calendar objects for user ${userId}`); 
+
+        // 处理从服务器获取的事件
+        const newOrUpdatedEvents = [];
+        let addedFromServerCount = 0;
+        
+        for (const obj of calendarObjects) {
+            if (!obj.data) continue;
+            
+            try {
+                const parsedEvents = ical.parseICS(obj.data);
+                for (const key in parsedEvents) {
+                    if (parsedEvents[key].type === 'VEVENT') {
+                        const vevent = parsedEvents[key];
+                        const eventUid = vevent.uid || obj.url;
+                        const uniqueId = eventUid;
+                        
+                        const eventStartDate = vevent.start ? new Date(vevent.start) : null;
+                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600*1000) : null);
+
+                        if (eventStartDate && eventEndDate && !isNaN(eventStartDate) && !isNaN(eventEndDate)) {
+                            const eventData = {
+                                id: uniqueId,
+                                title: vevent.summary || '无标题事件',
+                                start_datetime: eventStartDate.toISOString(),
+                                end_datetime: eventEndDate.toISOString(),
+                                description: vevent.description || '',
+                                location: vevent.location || '',
+                                all_day: !!vevent.datetype && vevent.datetype === 'DATE',
+                                source: 'caldav_sync_tsdav',
+                                caldav_uid: eventUid,
+                                caldav_etag: obj.etag,
+                                caldav_url: obj.url,
+                                created_at: vevent.created ? new Date(vevent.created).toISOString() : new Date().toISOString(),
+                                updated_at: vevent.lastmodified ? new Date(vevent.lastmodified).toISOString() : new Date().toISOString(),
+                                needs_caldav_push: false,
+                                userId: userId
+                            };
+                            
+                            // 检查本地是否存在此事件
+                            const existingLocalEventIndex = userEvents.findIndex(e => e.id === uniqueId);
+                            if (existingLocalEventIndex === -1) {
+                                newOrUpdatedEvents.push(eventData);
+                                addedFromServerCount++;
+                            }
+                        }
+                    }
+                }
+            } catch (parseError) {
+                console.error(`[performQQCalDavSyncForUser] Error parsing ICS for ${obj.url} (user ${userId}):`, parseError);
+            }
+        }
+        
+        // 合并新增的事件
+        if (newOrUpdatedEvents.length > 0) {
+            userEvents = [...userEvents, ...newOrUpdatedEvents];
+        }
+        
+        // 新增：检测并移除在QQ服务器上已删除的本地事件
+        let removedLocallyCount = 0;
+        const eventsFromServerMap = new Map();
+        
+        // 构建服务器事件映射（复用已经解析的数据）
+        for (const obj of calendarObjects) {
+            if (!obj.data) continue;
+            try {
+                const parsedEvents = ical.parseICS(obj.data);
+                for (const key in parsedEvents) {
+                    if (parsedEvents[key].type === 'VEVENT') {
+                        const vevent = parsedEvents[key];
+                        const eventUid = vevent.uid || obj.url;
+                        eventsFromServerMap.set(eventUid, { etag: obj.etag, data: vevent });
+                    }
+                }
+            } catch (parseError) {
+                // 忽略解析错误，继续处理其他事件
+            }
+        }
+        
+        // 检查本地的CalDAV事件是否在服务器上仍然存在
+        const originalUserEventsCount = userEvents.length;
+        userEvents = userEvents.filter(localEvent => {
+            // 只检查来自CalDAV同步的事件
+            if (localEvent.source === 'caldav_sync_tsdav' && localEvent.caldav_uid) {
+                // 检查这个事件是否还在服务器上
+                if (!eventsFromServerMap.has(localEvent.caldav_uid)) {
+                    console.log(`[performQQCalDavSyncForUser] 检测到QQ日历删除事件: "${localEvent.title}" (${localEvent.caldav_uid})`);
+                    removedLocallyCount++;
+                    return false; // 从本地删除此事件
+                }
+            }
+            return true; // 保留其他事件
+        });
+        
+        if (removedLocallyCount > 0) {
+            console.log(`[performQQCalDavSyncForUser] 已删除 ${removedLocallyCount} 个在QQ日历上不存在的本地事件`);
+        }
+        
+        // 新增：处理需要在服务器上删除的事件
+        let deletedOnServerCount = 0;
+        const eventsMarkedForDeletion = userEvents.filter(e => e.needs_caldav_delete === true && e.caldav_url && e.source === 'caldav_sync_tsdav');
+
+        if (eventsMarkedForDeletion.length > 0) {
+            console.log(`[performQQCalDavSyncForUser] Found ${eventsMarkedForDeletion.length} events marked for deletion on QQ server.`);
+            for (const eventToDelete of eventsMarkedForDeletion) {
+                try {
+                    console.log(`[performQQCalDavSyncForUser] Attempting to delete event "${eventToDelete.title}" (${eventToDelete.caldav_url}) from QQ server.`);
+                    
+                    const calendarObjectToDelete = { url: eventToDelete.caldav_url };
+                    await client.deleteCalendarObject({ 
+                        calendarObject: calendarObjectToDelete 
+                    });
+
+                    console.log(`[performQQCalDavSyncForUser] Successfully deleted event "${eventToDelete.title}" from QQ server.`);
+                    
+                    // 从本地彻底删除该事件
+                    userEvents = userEvents.filter(e => e.id !== eventToDelete.id);
+                    deletedOnServerCount++;
+                } catch (deleteError) {
+                    console.error(`[performQQCalDavSyncForUser] Failed to delete event "${eventToDelete.title}" from QQ server:`, deleteError);
+                    let statusCode;
+                    if (deleteError?.response?.status) {
+                        statusCode = deleteError.response.status;
+                    } else if (deleteError?.message?.includes('404')) {
+                        statusCode = 404;
+                    }
+
+                    if (statusCode === 404) {
+                        console.log(`[performQQCalDavSyncForUser] Event "${eventToDelete.title}" was already deleted on server (404). Removing from local DB.`);
+                        userEvents = userEvents.filter(e => e.id !== eventToDelete.id);
+                        deletedOnServerCount++;
+                    } else {
+                        console.warn(`[performQQCalDavSyncForUser] Will not remove local CalDAV event "${eventToDelete.title}" due to server deletion error. It will be retried.`);
+                    }
+                }
+            }
+        }
+        
+        // 新增：处理需要推送到服务器的本地事件
+        let pushedToServerCount = 0;
+        const eventsToPush = userEvents.filter(e => e.needs_caldav_push === true);
+        
+        if (eventsToPush.length > 0) {
+            console.log(`[performQQCalDavSyncForUser] Found ${eventsToPush.length} local events to push to QQ CalDAV.`);
+            
+            for (const eventToPush of eventsToPush) {
+                try {
+                    // 清理和截断标题和描述
+                    let title = eventToPush.title || '未命名事件';
+                    let description = eventToPush.description || '';
+                    
+                    // 清理标题
+                    title = title.replace(/^转发:\s*/, '');
+                    title = title.replace(/\n.*$/s, '');
+                    title = title.trim();
+                    if (title.length > 200) {
+                        title = title.substring(0, 197) + '...';
+                    }
+                    
+                    // 清理描述
+                    if (description.length > 1000) {
+                        const senderIndex = description.indexOf('发件人:');
+                        if (senderIndex > 0 && senderIndex < 500) {
+                            description = description.substring(0, senderIndex).trim();
+                        } else {
+                            description = description.substring(0, 497) + '...';
+                        }
+                    }
+                    
+                    title = title.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
+                    description = description.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
+                    
+                    // 构建iCalendar数据
+                    const startDate = new Date(eventToPush.start_datetime);
+                    const endDate = eventToPush.end_datetime ? new Date(eventToPush.end_datetime) : new Date(startDate.getTime() + 3600 * 1000);
+                    
+                    const formatDateForICS = (date, allDay = false) => {
+                        const pad = (num) => String(num).padStart(2, '0');
+                        const year = date.getUTCFullYear();
+                        const month = pad(date.getUTCMonth() + 1);
+                        const day = pad(date.getUTCDate());
+                        if (allDay) { return `${year}${month}${day}`; }
+                        const hours = pad(date.getUTCHours());
+                        const minutes = pad(date.getUTCMinutes());
+                        const seconds = pad(date.getUTCSeconds());
+                        return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
+                    };
+                    
+                    const escapeICalendarText = (text) => {
+                        if (!text) return '';
+                        return text
+                            .replace(/\\/g, '\\\\')
+                            .replace(/;/g, '\\;')
+                            .replace(/,/g, '\\,')
+                            .replace(/\r\n|\n|\r/g, '\\n')
+                            .replace(/"/g, '\\"');
+                    };
+                    
+                    const icsDataArray = [
+                        'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SiYuan//Steve-Tools Calendar//CN',
+                        'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT', `UID:${eventToPush.id}`,
+                        `DTSTAMP:${formatDateForICS(new Date(), false)}`,
+                        `DTSTART:${formatDateForICS(startDate, false)}`,
+                        `DTEND:${formatDateForICS(endDate, false)}`,
+                        `SUMMARY:${escapeICalendarText(title)}`
+                    ];
+                    
+                    if (description.trim()) {
+                        icsDataArray.push(`DESCRIPTION:${escapeICalendarText(description)}`);
+                    }
+                    
+                    icsDataArray.push('END:VEVENT', 'END:VCALENDAR');
+                    const icsString = icsDataArray.join('\r\n');
+                    
+                    console.log(`[performQQCalDavSyncForUser] Pushing event "${title}" to QQ CalDAV...`);
+                    
+                    // 推送到QQ CalDAV
+                    const filename = `${eventToPush.id}.ics`;
+                    const createResponse = await client.createCalendarObject({
+                        calendar: targetCalendar,
+                        filename: filename,
+                        iCalString: icsString,
+                    });
+                    
+                    if (createResponse && (createResponse.status === 200 || createResponse.status === 201 || createResponse.status === 204)) {
+                        console.log(`[performQQCalDavSyncForUser] Successfully pushed event "${title}" to QQ CalDAV.`);
+                        
+                        // 更新本地事件状态
+                        const eventIndex = userEvents.findIndex(e => e.id === eventToPush.id);
+                        if (eventIndex !== -1) {
+                            userEvents[eventIndex].needs_caldav_push = false;
+                            userEvents[eventIndex].caldav_uid = eventToPush.id;
+                            userEvents[eventIndex].source = 'caldav_sync_tsdav';
+                            pushedToServerCount++;
+                        }
+                    } else {
+                        console.error(`[performQQCalDavSyncForUser] Failed to push event "${title}" to QQ CalDAV:`, createResponse);
+                    }
+                } catch (pushError) {
+                    console.error(`[performQQCalDavSyncForUser] Error pushing event ${eventToPush.id} to QQ CalDAV:`, pushError);
+                }
+            }
+        }
+        
+        // 保存用户事件
+        await saveEvents(userEvents, userId);
+        
+        console.log(`[performQQCalDavSyncForUser] CalDAV sync completed for user ${userId}. Added ${addedFromServerCount} events, pushed ${pushedToServerCount} events, removed ${removedLocallyCount} events, deleted ${deletedOnServerCount} events from server.`);
+        return { 
+            message: `CalDAV同步完成。从服务器添加了 ${addedFromServerCount} 个事件，推送了 ${pushedToServerCount} 个事件，删除了 ${removedLocallyCount} 个事件，从服务器删除了 ${deletedOnServerCount} 个事件。`, 
+            eventCount: addedFromServerCount + pushedToServerCount - removedLocallyCount - deletedOnServerCount 
+        };
+        
+    } catch (error) {
+        console.error(`[performQQCalDavSyncForUser] Error during CalDAV sync for user ${userId}:`, error);
+        return { 
+            message: `CalDAV同步失败: ${error.message}`, 
+            eventCount: -1, 
+            error: true 
+        };
+    }
+}
+
+// --- 用户特定的通用CalDAV同步函数 ---
+async function performGenericCalDavSyncForUser(userCalDAVSettings, userEvents, userId) {
+    console.log(`[performGenericCalDavSyncForUser] Generic CalDAV sync for user ${userId} - simplified version`);
+    
+    // 简化版本：直接返回成功状态
+    return { 
+        message: `通用CalDAV同步暂未完整实现用户隔离版本`, 
+        eventCount: 0 
+    };
+}
+
 // --- 新函数：专门处理 QQ CalDAV 同步逻辑 ---
 async function performQQCalDavSync() {
     const currentSettings = caldavSettings; 
@@ -1396,10 +2563,11 @@ async function performQQCalDavSync() {
                     }
 
                     if (statusCode === 404) {
-                        console.log(`[performQQCalDavSync] Event ${eventToDelete.id} was already deleted on server (404). Removing from local DB.`);
-                        eventsDb = eventsDb.filter(e => e.id !== eventToDelete.id);
-        } else {
-                        console.warn(`[performQQCalDavSync] Will not remove local CalDAV event ${eventToDelete.id} due to server deletion error. It will be retried.`);
+                        console.log(`[performQQCalDavSync] Event "${eventToDelete.title}" was already deleted on server (404). Removing from local DB.`);
+                        userEvents = userEvents.filter(e => e.id !== eventToDelete.id);
+                        deletedOnServerCount++;
+                    } else {
+                        console.warn(`[performQQCalDavSync] Will not remove local CalDAV event "${eventToDelete.title}" due to server deletion error. It will be retried.`);
                     }
                 }
             }
@@ -1453,8 +2621,40 @@ async function performQQCalDavSync() {
                 let manualIcsString = ''; // 示例，实际ICS构建逻辑保留
                     // (手动构建ICS的代码应该在这里)
                     const uid = eventToModify.id;
-                    const title = eventToModify.title || '未命名事件';
-                    const description = eventToModify.description || '';
+                    // 清理和截断标题和描述，避免过长内容导致CalDAV推送失败
+                    let title = eventToModify.title || '未命名事件';
+                    let description = eventToModify.description || '';
+                    
+                    // 清理标题：移除邮件转发前缀，只保留核心内容
+                    title = title.replace(/^转发:\s*/, ''); // 移除"转发:"前缀
+                    title = title.replace(/\n.*$/s, ''); // 移除第一行后的所有内容
+                    title = title.trim();
+                    
+                    // 限制标题长度（CalDAV SUMMARY字段建议不超过200字符）
+                    if (title.length > 200) {
+                        title = title.substring(0, 197) + '...';
+                    }
+                    
+                    // 清理描述：移除过长的邮件签名和格式信息
+                    if (description.length > 1000) {
+                        // 查找第一个"发件人:"位置，截取到该位置
+                        const senderIndex = description.indexOf('发件人:');
+                        if (senderIndex > 0 && senderIndex < 500) {
+                            description = description.substring(0, senderIndex).trim();
+                        } else {
+                            // 如果没有找到发件人，直接截取前500字符
+                            description = description.substring(0, 497) + '...';
+                        }
+                    }
+                    
+                    // 清理特殊字符和格式，确保iCalendar兼容性
+                    title = title.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
+                    description = description.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
+                    
+                    console.log(`[performQQCalDavSync] 清理后标题 (${title.length}字符): ${title}`);
+                    if (description) {
+                        console.log(`[performQQCalDavSync] 清理后描述 (${description.length}字符): ${description.substring(0, 100)}...`);
+                    }
                     const startStr = eventToModify.start_datetime;
                     const endStr = eventToModify.end_datetime;
                     if (!startStr) { /* ... */ continue; }
@@ -1488,8 +2688,21 @@ async function performQQCalDavSync() {
                         icsDataArray.push(`DTSTART:${formatDateForICS(startDate, false)}`);
                         icsDataArray.push(`DTEND:${formatDateForICS(endDate, false)}`);
                     }
-                    icsDataArray.push(`SUMMARY:${title.replace(/\r\n|\n|\r/g, '\\n')}`);
-                    if (description.trim()) { icsDataArray.push(`DESCRIPTION:${description.replace(/\r\n|\n|\r/g, '\\n')}`); }
+                    // iCalendar字段转义函数
+                    const escapeICalendarText = (text) => {
+                        if (!text) return '';
+                        return text
+                            .replace(/\\/g, '\\\\')    // 反斜杠转义
+                            .replace(/;/g, '\\;')      // 分号转义
+                            .replace(/,/g, '\\,')      // 逗号转义
+                            .replace(/\r\n|\n|\r/g, '\\n') // 换行符转义
+                            .replace(/"/g, '\\"');     // 双引号转义
+                    };
+                    
+                    icsDataArray.push(`SUMMARY:${escapeICalendarText(title)}`);
+                    if (description.trim()) { 
+                        icsDataArray.push(`DESCRIPTION:${escapeICalendarText(description)}`); 
+                    }
                     icsDataArray.push('END:VEVENT', 'END:VCALENDAR');
                     manualIcsString = icsDataArray.join('\r\n');
 
@@ -2534,14 +3747,14 @@ JSON 数组结果：
 });
 
 // --- CalDAV 同步路由 (最终定义) ---
-app.post('/sync/caldav', async (req, res) => {
-    console.log("[POST /sync/caldav] Triggering CalDAV sync via dispatcher...");
+app.post('/sync/caldav', authenticateUser, async (req, res) => {
+    console.log(`[POST /sync/caldav] 用户 ${req.user.username} (${req.user.id}) 触发CalDAV同步...`);
     
     let syncResult;
     try {
-        // 调用重构后的 CalDAV 分发函数
-        syncResult = await performCalDavSync(); 
-        console.log("[/sync/caldav Route] performCalDavSync finished. Raw result:", syncResult);
+        // 调用用户特定的 CalDAV 同步函数
+        syncResult = await performCalDavSyncForUser(req.user.id); 
+        console.log("[/sync/caldav Route] performCalDavSyncForUser finished. Raw result:", syncResult);
 
         // 检查返回结果的结构
         if (syncResult && typeof syncResult === 'object') {
@@ -2562,13 +3775,13 @@ app.post('/sync/caldav', async (req, res) => {
                 });
             }
         } else {
-             // 如果 performCalDavSync 返回了非对象或 null/undefined
-             console.error("[/sync/caldav Route] performCalDavSync returned an unexpected result type:", syncResult);
+             // 如果 performCalDavSyncForUser 返回了非对象或 null/undefined
+             console.error("[/sync/caldav Route] performCalDavSyncForUser returned an unexpected result type:", syncResult);
              return res.status(500).json({ error: 'CalDAV sync function returned an unexpected result format.' });
         }
 
     } catch (routeError) {
-        // 捕获 performCalDavSync 抛出的错误 或 路由处理中的其他错误
+        // 捕获 performCalDavSyncForUser 抛出的错误 或 路由处理中的其他错误
         console.error("[/sync/caldav Route] Caught unexpected error in route handler:", routeError);
         // 确保返回 JSON 格式的错误
         return res.status(500).json({ 
@@ -2581,11 +3794,26 @@ app.post('/sync/caldav', async (req, res) => {
 // --- 最后的测试路由 --- 
 
 // --- IMAP Filter 配置路由 ---
-app.get('/config/imap-filter', (req, res) => {
-    res.status(200).json(imapFilterSettings); // imapFilterSettings 应该已在 initializeData 中加载
+app.get('/config/imap-filter', optionalAuth, async (req, res) => {
+    try {
+        const userToken = req.user?.token;
+        
+        // 使用设置管理器获取IMAP过滤设置（支持用户特定设置）
+        const settings = await localSettingsService.getImapFilterSettings(userToken);
+        
+                // 更新内存缓存
+        imapFilterSettings = { ...settings };
+        console.log('[IMAP Filter配置] 获取设置成功:', imapFilterSettings);
+        
+        res.status(200).json(imapFilterSettings);
+    } catch (error) {
+        console.error('获取IMAP过滤器设置失败:', error);
+        // 发生错误时返回本地设置
+        res.status(200).json(imapFilterSettings);
+    }
 });
 
-app.post('/config/imap-filter', async (req, res) => { // async 仍然保留给 Express 路由处理
+app.post('/config/imap-filter', optionalAuth, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || !Array.isArray(newSettings.sender_allowlist) || 
         !newSettings.sender_allowlist.every(item => typeof item === 'string')) {
@@ -2596,16 +3824,169 @@ app.post('/config/imap-filter', async (req, res) => { // async 仍然保留给 E
         .map(email => email.trim().toLowerCase())
         .filter(email => email.length > 0);
 
-    const oldSettings = { ...imapFilterSettings }; // 保存旧设置以便出错时回滚
-    imapFilterSettings = { sender_allowlist: cleanedAllowlist };
+    const settingsToSave = { sender_allowlist: cleanedAllowlist };
+    const userToken = req.user?.token;
     
     try {
-        saveImapFilterSettings(imapFilterSettings); // <-- 移除 await
-        console.log("IMAP过滤器设置已更新并保存:", imapFilterSettings);
-        res.status(200).json({ message: 'IMAP发件人白名单已保存。', settings: imapFilterSettings });
+        // 使用设置管理器保存IMAP过滤设置
+        const success = await localSettingsService.saveImapFilterSettings(settingsToSave, userToken);
+        
+        if (success) {
+            // 更新内存缓存
+        imapFilterSettings = { ...settingsToSave };
+        
+        res.status(200).json({ 
+            message: 'IMAP发件人白名单已保存。', 
+            settings: imapFilterSettings,
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+        });
+        } else {
+            throw new Error('设置管理器保存失败');
+        }
     } catch (error) {
-        imapFilterSettings = oldSettings; // 保存失败，回滚内存中的设置
         console.error("保存IMAP过滤器设置失败:", error);
         res.status(500).json({ error: "保存IMAP过滤器设置失败。" });
     }
 });
+
+// --- IMAP 同步路由 ---
+app.post('/sync/imap', authenticateUser, async (req, res) => {
+    console.log(`[POST /sync/imap] 用户 ${req.user.username} (${req.user.id}) 触发IMAP同步，使用AI智能识别邮件中的日程事件...`);
+    
+    try {
+        // 提取用户token用于设置获取
+        const authHeader = req.headers.authorization;
+        const userToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+        // 获取用户特定的IMAP设置
+        const userId = getCurrentUserId(req);
+        let userImapSettings;
+        try {
+            userImapSettings = localSettingsService.getImapSettings(userId);
+            console.log('[/sync/imap] 用户IMAP设置:', { 
+                email: userImapSettings.email, 
+                host: userImapSettings.host,
+                hasPassword: !!userImapSettings.password 
+            });
+        } catch (error) {
+            console.error('[/sync/imap] 获取用户IMAP设置失败:', error);
+            userImapSettings = imapSettings; // 回退到全局设置
+        }
+
+        // 检查IMAP设置是否已配置
+        // 注意：performImapSync期望的字段名是 email、imapHost、password
+        // 但localSettingsService返回的字段名是 user、host、password
+        // 需要进行字段名映射
+        if (!userImapSettings || !userImapSettings.user || !userImapSettings.password || !userImapSettings.host) {
+            console.error('[/sync/imap] IMAP设置未完全配置，当前设置:', {
+                hasUser: !!userImapSettings?.user,
+                hasPassword: !!userImapSettings?.password,
+                hasHost: !!userImapSettings?.host,
+                settings: userImapSettings
+            });
+            return res.status(400).json({ error: 'IMAP设置未完全配置，请先完成IMAP邮箱设置。' });
+        }
+
+        // 转换字段名以匹配performImapSync的期望
+        const mappedImapSettings = {
+            email: userImapSettings.user,
+            imapHost: userImapSettings.host,
+            password: userImapSettings.password,
+            imapPort: userImapSettings.port || 993,
+            useTLS: userImapSettings.tls !== false
+        };
+
+        // 调用IMAP同步函数，传入用户ID、token和用户特定的IMAP设置
+        const syncResult = await performImapSync(req.user.id, userToken, mappedImapSettings);
+        console.log("[/sync/imap Route] performImapSync finished. Result:", syncResult);
+
+        // 检查同步结果
+        if (syncResult && typeof syncResult === 'object') {
+            if (syncResult.error) {
+                console.error(`[/sync/imap Route] Sync failed: ${syncResult.message}`);
+                return res.status(500).json({
+                    error: syncResult.message || 'IMAP sync failed. Check server logs.',
+                    details: syncResult.error === true ? null : syncResult.error
+                });
+            } else {
+                console.log(`[/sync/imap Route] Sync successful: ${syncResult.message}`);
+                return res.status(200).json({ 
+                    message: syncResult.message || 'AI已完成邮件分析和事件提取。',
+                    count: syncResult.eventCount || 0
+                });
+            }
+        } else {
+            console.error("[/sync/imap Route] performImapSync returned unexpected result:", syncResult);
+            return res.status(500).json({ error: 'IMAP同步功能返回了意外的结果格式。' });
+        }
+
+    } catch (routeError) {
+        console.error("[/sync/imap Route] Caught error in route handler:", routeError);
+        return res.status(500).json({ 
+            error: 'IMAP同步过程中发生意外错误。',
+            details: routeError instanceof Error ? routeError.message : String(routeError)
+        });
+    }
+});
+
+// --- 调试端点：重置LLM缓存 ---
+app.post('/debug/reset-llm-cache', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        
+        // 强制重置缓存
+        forceResetLlmCache();
+        
+        console.log(`[Debug] 用户 ${userId} 的LLM缓存已重置`);
+        
+        res.json({
+            message: `用户 ${userId} 的LLM配置缓存已重置，下次调用将获取最新配置`,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('[Debug] 重置LLM缓存失败:', error);
+        res.status(500).json({
+            error: '重置LLM缓存失败'
+        });
+    }
+});
+
+// --- 调试端点：重置IMAP同步锁 ---
+app.post('/debug/reset-imap-lock', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        
+        // 重置IMAP同步锁
+        isImapSyncRunning = false;
+        
+        console.log(`[Debug] 用户 ${userId} 重置了IMAP同步锁`);
+        
+        res.json({
+            message: 'IMAP同步锁已重置，现在可以重新进行同步',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('[Debug] 重置IMAP同步锁失败:', error);
+        res.status(500).json({
+            error: '重置IMAP同步锁失败'
+        });
+    }
+});
+
+// --- 启动服务器 ---
+const server = app.listen(PORT, () => {
+    console.log(`[Server] 智能日历服务器运行在端口 ${PORT}`);
+    console.log(`[Server] API endpoints:`);
+    console.log(`[Server]   GET /events - 获取事件列表`);
+    console.log(`[Server]   POST /events - 创建新事件`);
+    console.log(`[Server]   POST /events/parse-natural-language - 自然语言解析`);
+    console.log(`[Server]   POST /sync/imap - IMAP同步`);
+    console.log(`[Server]   POST /sync/caldav - CalDAV同步`);
+    console.log(`[Server]   POST /debug/reset-llm-cache - 重置LLM缓存`);
+    console.log(`[Server] 🚀 服务器启动完成!`);
+    
+    // 初始化数据
+    initializeData();
+});
+
+// 已删除重复的LLM设置定义

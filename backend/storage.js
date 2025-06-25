@@ -4,6 +4,12 @@ const { v4: uuidv4 } = require('uuid');
 
 // 文件路径定义
 const DATA_DIR = path.join(__dirname, 'data');
+const USERS_DATA_DIR = path.join(DATA_DIR, 'users'); // 用户数据目录
+
+// 全局设置文件（所有用户共享的设置，如服务配置等）
+const GLOBAL_SETTINGS_FILE = path.join(DATA_DIR, 'global_settings.json');
+
+// 传统文件路径（向后兼容，用于迁移或默认用户）
 const LLM_SETTINGS_FILE = path.join(DATA_DIR, 'llm_settings.json');
 const EVENTS_FILE = path.join(DATA_DIR, 'events_db.json');
 const EXCHANGE_SETTINGS_FILE = path.join(DATA_DIR, 'exchange_settings.json');
@@ -19,13 +25,45 @@ function ensureDataDir() {
         if (!fs.existsSync(DATA_DIR)) {
             fs.mkdirSync(DATA_DIR, { recursive: true });
             console.log(`数据目录已创建: ${DATA_DIR}`);
-        } else {
-            // console.log(`数据目录已存在: ${DATA_DIR}`); // 可选日志
+        }
+        if (!fs.existsSync(USERS_DATA_DIR)) {
+            fs.mkdirSync(USERS_DATA_DIR, { recursive: true });
+            console.log(`用户数据目录已创建: ${USERS_DATA_DIR}`);
         }
     } catch (error) {
         console.error('检查或创建数据目录时出错:', error);
         throw error;
     }
+}
+
+/**
+ * 确保用户数据目录存在
+ * @param {string} userId - 用户ID
+ */
+function ensureUserDataDir(userId) {
+    try {
+        ensureDataDir();
+        const userDir = path.join(USERS_DATA_DIR, userId);
+        if (!fs.existsSync(userDir)) {
+            fs.mkdirSync(userDir, { recursive: true });
+            console.log(`用户数据目录已创建: ${userDir}`);
+        }
+        return userDir;
+    } catch (error) {
+        console.error(`创建用户 ${userId} 数据目录时出错:`, error);
+        throw error;
+    }
+}
+
+/**
+ * 获取用户特定文件路径
+ * @param {string} userId - 用户ID
+ * @param {string} filename - 文件名
+ * @returns {string} 完整文件路径
+ */
+function getUserFilePath(userId, filename) {
+    const userDir = ensureUserDataDir(userId);
+    return path.join(userDir, filename);
 }
 
 /**
@@ -61,7 +99,12 @@ function loadJsonFile(filePath, defaultValue = {}) {
  */
 function saveJsonFile(filePath, data) {
     try {
-        ensureDataDir();
+        // 确保目录存在
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
         // console.log(`数据已保存到 ${filePath}`); // 可选成功日志
     } catch (error) {
@@ -70,55 +113,172 @@ function saveJsonFile(filePath, data) {
     }
 }
 
+// ============== 用户隔离的数据操作函数 ==============
+
 /**
- * 加载LLM设置
+ * 加载用户的LLM设置
+ * @param {string} userId - 用户ID，如果为null则使用全局设置
  * @returns {Object} LLM设置对象
  */
-function loadLLMSettings() {
+/**
+ * 加载用户的LLM设置（支持多provider）
+ * @param {string} userId - 用户ID，如果为null则使用全局设置
+ * @returns {Object} LLM设置对象
+ */
+function loadLLMSettings(userId = null) {
     const defaultSettings = {
         provider: "none",
-        apiKey: "",
-        model: "",
-        baseUrl: ""
+        api_key: "",
+        model_name: "",
+        base_url: ""
     };
-    return loadJsonFile(LLM_SETTINGS_FILE, defaultSettings);
+    
+    const filePath = userId ? getUserFilePath(userId, 'llm_settings.json') : LLM_SETTINGS_FILE;
+    const userSettings = loadJsonFile(filePath, defaultSettings);
+    
+    // 处理新的多provider格式
+    if (userSettings.providers && userSettings.current_provider) {
+        const currentProviderSettings = userSettings.providers[userSettings.current_provider];
+        if (currentProviderSettings) {
+            // 返回当前provider的设置，但保持兼容旧格式
+            const compatibleFormat = {
+                provider: userSettings.current_provider,
+                api_key: currentProviderSettings.api_key,
+                model_name: currentProviderSettings.model_name,
+                base_url: currentProviderSettings.base_url,
+                // 同时包含新格式信息，供前端使用
+                _multi_provider: true,
+                _all_providers: userSettings.providers,
+                updated_at: userSettings.updated_at
+            };
+            
+            console.log(`加载用户 ${userId || '全局'} LLM设置，当前provider: ${userSettings.current_provider}`);
+            return compatibleFormat;
+        }
+    }
+    
+    // 兼容旧的单provider格式
+    if (userSettings.provider === 'builtin') {
+        const builtinDefaults = getProviderDefaults('builtin');
+        return {
+            provider: 'builtin',
+            api_key: builtinDefaults.api_key,
+            model_name: builtinDefaults.default_model,
+            base_url: builtinDefaults.base_url,
+            description: builtinDefaults.description
+        };
+    }
+    
+    return userSettings;
 }
 
 /**
- * 保存LLM设置
+ * 获取provider的默认配置
+ */
+function getProviderDefaults(provider) {
+    const providerDefaults = {
+        'openai': {
+            base_url: 'https://api.openai.com/v1',
+            default_model: 'gpt-4o-mini'
+        },
+        'anthropic': {
+            base_url: 'https://api.anthropic.com',
+            default_model: 'claude-3-haiku-20240307'
+        },
+        'deepseek': {
+            base_url: 'https://api.deepseek.com/v1',
+            default_model: 'deepseek-chat'
+        },
+        'google': {
+            base_url: 'https://generativelanguage.googleapis.com/v1beta',
+            default_model: 'gemini-1.5-flash'
+        },
+        'openrouter': {
+            base_url: 'https://openrouter.ai/api/v1',
+            default_model: 'meta-llama/llama-3.2-3b-instruct:free'
+        },
+        'ollama': {
+            base_url: 'http://localhost:11434/v1',
+            default_model: 'llama3.2:3b'
+        },
+        'builtin': {
+            base_url: '',
+            default_model: 'builtin-free',
+            api_key: 'builtin-free-key',
+            description: '内置免费模型'
+        }
+    };
+    
+    return providerDefaults[provider] || { base_url: '', default_model: '' };
+}
+
+/**
+ * 保存用户的LLM设置（支持多provider）
  * @param {Object} settings - LLM设置对象
+ * @param {string} userId - 用户ID，如果为null则保存到全局设置
  */
-function saveLLMSettings(settings) {
-    saveJsonFile(LLM_SETTINGS_FILE, settings);
+function saveLLMSettings(settings, userId = null) {
+    const filePath = userId ? getUserFilePath(userId, 'llm_settings.json') : LLM_SETTINGS_FILE;
+    
+    // 读取现有设置
+    let existingSettings = loadJsonFile(filePath, {
+        current_provider: 'none',
+        providers: {}
+    });
+    
+    // 确保结构正确
+    if (!existingSettings.providers) {
+        existingSettings.providers = {};
+    }
+    
+    const provider = settings.provider;
+    const defaults = getProviderDefaults(provider);
+    
+    // 处理内置免费模型
+    if (provider === 'builtin') {
+        existingSettings.providers[provider] = {
+            api_key: defaults.api_key,
+            model_name: defaults.default_model,
+            base_url: defaults.base_url,
+            description: defaults.description,
+            updated_at: new Date().toISOString()
+        };
+    } else {
+        // 更新指定provider的设置，自动设置正确的base_url
+        existingSettings.providers[provider] = {
+            api_key: settings.api_key || '',
+            model_name: settings.model_name || defaults.default_model,
+            base_url: defaults.base_url, // 使用固定的base_url
+            updated_at: new Date().toISOString()
+        };
+    }
+    
+    // 设置当前provider
+    existingSettings.current_provider = provider;
+    existingSettings.updated_at = new Date().toISOString();
+    
+    console.log(`保存${provider}设置到 ${filePath}，使用base_url: ${defaults.base_url}`);
+    
+    saveJsonFile(filePath, existingSettings);
 }
 
 /**
- * 加载Exchange设置
- * @returns {Object} Exchange设置对象
- */
-function loadExchangeSettings() {
-    const defaultSettings = {
-        email: "",
-        password: "",
-        serverUrl: ""
-    };
-    return loadJsonFile(EXCHANGE_SETTINGS_FILE, defaultSettings);
-}
-
-/**
- * 保存Exchange设置
- * @param {Object} settings - Exchange设置对象
- */
-function saveExchangeSettings(settings) {
-    saveJsonFile(EXCHANGE_SETTINGS_FILE, settings);
-}
-
-/**
- * 加载事件数据
+ * 加载用户的事件数据
+ * @param {string} userId - 用户ID，如果为null则使用全局事件
  * @returns {Array} 事件数组
  */
-function loadEvents() {
-    const events = loadJsonFile(EVENTS_FILE, []);
+function loadEvents(userId = null) {
+    const defaultEvents = [];
+    
+    let events;
+    if (userId) {
+        const userFilePath = getUserFilePath(userId, 'events_db.json');
+        events = loadJsonFile(userFilePath, defaultEvents);
+    } else {
+        // 向后兼容：无用户ID时使用全局文件
+        events = loadJsonFile(EVENTS_FILE, defaultEvents);
+    }
+    
     return events.map(event => ({
         ...event,
         completed: event.completed === true
@@ -126,18 +286,60 @@ function loadEvents() {
 }
 
 /**
- * 保存事件数据
+ * 保存用户的事件数据
  * @param {Array} events - 事件数组
+ * @param {string} userId - 用户ID，如果为null则保存到全局文件
  */
-function saveEvents(events) {
-    saveJsonFile(EVENTS_FILE, events);
+function saveEvents(events, userId = null) {
+    if (userId) {
+        const userFilePath = getUserFilePath(userId, 'events_db.json');
+        saveJsonFile(userFilePath, events);
+    } else {
+        // 向后兼容：无用户ID时保存到全局文件
+        saveJsonFile(EVENTS_FILE, events);
+    }
 }
 
 /**
- * 加载IMAP邮箱设置
+ * 加载用户的Exchange设置
+ * @param {string} userId - 用户ID，如果为null则使用全局设置
+ * @returns {Object} Exchange设置对象
+ */
+function loadExchangeSettings(userId = null) {
+    const defaultSettings = {
+        email: "",
+        password: "",
+        serverUrl: ""
+    };
+    
+    if (userId) {
+        const userFilePath = getUserFilePath(userId, 'exchange_settings.json');
+        return loadJsonFile(userFilePath, defaultSettings);
+    } else {
+        return loadJsonFile(EXCHANGE_SETTINGS_FILE, defaultSettings);
+    }
+}
+
+/**
+ * 保存用户的Exchange设置
+ * @param {Object} settings - Exchange设置对象
+ * @param {string} userId - 用户ID，如果为null则保存到全局设置
+ */
+function saveExchangeSettings(settings, userId = null) {
+    if (userId) {
+        const userFilePath = getUserFilePath(userId, 'exchange_settings.json');
+        saveJsonFile(userFilePath, settings);
+    } else {
+        saveJsonFile(EXCHANGE_SETTINGS_FILE, settings);
+    }
+}
+
+/**
+ * 加载用户的IMAP设置
+ * @param {string} userId - 用户ID，如果为null则使用全局设置
  * @returns {Object} IMAP设置对象
  */
-function loadImapSettings() {
+function loadImapSettings(userId = null) {
     const defaultSettings = {
         email: "",
         password: "",  // 授权码
@@ -146,96 +348,314 @@ function loadImapSettings() {
         useTLS: true,
         active: false
     };
-    return loadJsonFile(IMAP_SETTINGS_FILE, defaultSettings);
+    
+    if (userId) {
+        const userFilePath = getUserFilePath(userId, 'imap_settings.json');
+        return loadJsonFile(userFilePath, defaultSettings);
+    } else {
+        return loadJsonFile(IMAP_SETTINGS_FILE, defaultSettings);
+    }
 }
 
 /**
- * 保存IMAP邮箱设置
+ * 保存用户的IMAP设置
  * @param {Object} settings - IMAP设置对象
+ * @param {string} userId - 用户ID，如果为null则保存到全局设置
  */
-function saveImapSettings(settings) {
-    saveJsonFile(IMAP_SETTINGS_FILE, settings);
+function saveImapSettings(settings, userId = null) {
+    if (userId) {
+        const userFilePath = getUserFilePath(userId, 'imap_settings.json');
+        saveJsonFile(userFilePath, settings);
+    } else {
+        saveJsonFile(IMAP_SETTINGS_FILE, settings);
+    }
 }
 
 /**
- * 加载CalDAV设置
+ * 加载用户的CalDAV设置
+ * @param {string} userId - 用户ID，如果为null则使用全局设置
  * @returns {Object} CalDAV设置对象
  */
-function loadCalDAVSettings() {
+function loadCalDAVSettings(userId = null) {
     try {
-        ensureDataDir();
-        const correctPath = path.join(__dirname, 'caldav_settings.json');
-        if (fs.existsSync(correctPath)) {
-            const data = fs.readFileSync(correctPath, 'utf8');
-            return JSON.parse(data);
+        if (userId) {
+            const userFilePath = getUserFilePath(userId, 'caldav_settings.json');
+            if (fs.existsSync(userFilePath)) {
+                const data = fs.readFileSync(userFilePath, 'utf8');
+                return JSON.parse(data);
+            } else {
+                console.log(`用户 ${userId} 的CalDAV settings文件未找到，返回默认空对象。`);
+                fs.writeFileSync(userFilePath, JSON.stringify({}, null, 2), 'utf8');
+                return {};
+            }
         } else {
-            console.log(`CalDAV settings file ${correctPath} not found, returning default empty object.`);
-            // 返回默认空对象并创建文件
-            fs.writeFileSync(correctPath, JSON.stringify({}, null, 2), 'utf8');
-            return {};
+            // 向后兼容的全局设置路径
+            ensureDataDir();
+            const correctPath = path.join(__dirname, 'caldav_settings.json');
+            if (fs.existsSync(correctPath)) {
+                const data = fs.readFileSync(correctPath, 'utf8');
+                return JSON.parse(data);
+            } else {
+                console.log(`CalDAV settings文件 ${correctPath} 未找到，返回默认空对象。`);
+                fs.writeFileSync(correctPath, JSON.stringify({}, null, 2), 'utf8');
+                return {};
+            }
         }
     } catch (error) {
-        console.error(`Error loading CalDAV settings from ${correctPath}:`, error);
+        console.error(`加载CalDAV设置时出错:`, error);
         return {}; // 返回默认空对象以防程序崩溃
     }
 }
 
 /**
- * 保存CalDAV设置
+ * 保存用户的CalDAV设置
  * @param {Object} settings - CalDAV设置对象
+ * @param {string} userId - 用户ID，如果为null则保存到全局设置
  */
-function saveCalDAVSettings(settings) {
+function saveCalDAVSettings(settings, userId = null) {
     try {
-        ensureDataDir();
-        const correctPath = path.join(__dirname, 'caldav_settings.json'); 
-        const data = JSON.stringify(settings, null, 2);
-        fs.writeFileSync(correctPath, data, 'utf8');
-        // console.log(`CalDAV settings saved to ${correctPath}`); // 可选日志
+        if (userId) {
+            const userFilePath = getUserFilePath(userId, 'caldav_settings.json');
+            const data = JSON.stringify(settings, null, 2);
+            fs.writeFileSync(userFilePath, data, 'utf8');
+        } else {
+            // 向后兼容的全局设置路径
+            ensureDataDir();
+            const correctPath = path.join(__dirname, 'caldav_settings.json'); 
+            const data = JSON.stringify(settings, null, 2);
+            fs.writeFileSync(correctPath, data, 'utf8');
+        }
     } catch (error) {
-        console.error(`Error saving CalDAV settings to ${correctPath}:`, error);
+        console.error(`保存CalDAV设置时出错:`, error);
         throw error;
     }
 }
 
-// loadImapFilterSettings 和 saveImapFilterSettings 已经是同步的了 (来自上次修改)
+// ============== IMAP过滤设置 (全局共享) ==============
+
+/**
+ * 加载IMAP过滤设置 (全局共享，不按用户隔离)
+ * @returns {Object} IMAP过滤设置对象
+ */
 function loadImapFilterSettings() {
     try {
-        const correctPath = path.join(__dirname, 'imap_filter_settings.json'); 
-        if (fs.existsSync(correctPath)) { 
-            const data = fs.readFileSync(correctPath, 'utf8'); 
+        if (fs.existsSync(IMAP_FILTER_SETTINGS_PATH)) {
+            const data = fs.readFileSync(IMAP_FILTER_SETTINGS_PATH, 'utf8');
             return JSON.parse(data);
+        } else {
+            console.log(`IMAP Filter settings file ${IMAP_FILTER_SETTINGS_PATH} not found, returning default settings.`);
+            const defaultSettings = { sender_allowlist: [] };
+            fs.writeFileSync(IMAP_FILTER_SETTINGS_PATH, JSON.stringify(defaultSettings, null, 2), 'utf8');
+            return defaultSettings;
         }
-        console.log("IMAP filter settings file not found, returning default empty allowlist.");
-        return { sender_allowlist: [] }; 
     } catch (error) {
-        console.error("Error loading IMAP filter settings:", error);
-        return { sender_allowlist: [] }; 
+        console.error(`Error loading IMAP filter settings from ${IMAP_FILTER_SETTINGS_PATH}:`, error);
+        return { sender_allowlist: [] }; // 返回默认设置以防程序崩溃
     }
 }
 
-function saveImapFilterSettings(settings) {
+/**
+ * 保存IMAP过滤设置
+ * @param {Object} settings - IMAP过滤设置对象
+ * @param {string} userId - 用户ID，如果为null则保存到全局设置
+ */
+function saveImapFilterSettings(settings, userId = null) {
     try {
-        const correctPath = path.join(__dirname, 'imap_filter_settings.json');
-        fs.writeFileSync(correctPath, JSON.stringify(settings, null, 2)); 
-        console.log("IMAP filter settings saved to:", correctPath);
+        if (userId) {
+            const userFilePath = getUserFilePath(userId, 'imap_filter_settings.json');
+            const data = JSON.stringify(settings, null, 2);
+            fs.writeFileSync(userFilePath, data, 'utf8');
+            console.log(`IMAP filter settings saved to ${userFilePath} for user ${userId}`);
+        } else {
+            // 向后兼容：无用户ID时保存到全局文件
+            const data = JSON.stringify(settings, null, 2);
+            fs.writeFileSync(IMAP_FILTER_SETTINGS_PATH, data, 'utf8');
+            console.log(`IMAP filter settings saved to ${IMAP_FILTER_SETTINGS_PATH}`);
+        }
     } catch (error) {
-        console.error("Error saving IMAP filter settings:", error);
-        throw error; 
+        const filePath = userId ? getUserFilePath(userId, 'imap_filter_settings.json') : IMAP_FILTER_SETTINGS_PATH;
+        console.error(`Error saving IMAP filter settings to ${filePath}:`, error);
+        throw error;
+    }
+}
+
+// ============== 数据迁移功能 ==============
+
+/**
+ * 迁移全局事件到用户事件文件
+ * @param {string} userId - 用户ID
+ * @returns {number} 迁移的事件数量
+ */
+function migrateGlobalEventsToUser(userId) {
+    try {
+        // 检查全局事件文件是否存在
+        if (!fs.existsSync(EVENTS_FILE)) {
+            console.log(`[数据迁移] 全局事件文件不存在: ${EVENTS_FILE}`);
+            return 0;
+        }
+
+        // 加载全局事件
+        const globalEvents = loadJsonFile(EVENTS_FILE, []);
+        if (globalEvents.length === 0) {
+            console.log(`[数据迁移] 全局事件文件为空，无需迁移`);
+            return 0;
+        }
+
+        // 检查用户事件文件
+        const userFilePath = getUserFilePath(userId, 'events_db.json');
+        let userEvents = [];
+        let needsMigration = true;
+
+        if (fs.existsSync(userFilePath)) {
+            userEvents = loadJsonFile(userFilePath, []);
+            
+            // 检查是否已经有迁移的事件
+            const hasMigratedEvents = userEvents.some(event => event.migrated_from_global);
+            if (hasMigratedEvents) {
+                console.log(`[数据迁移] 用户 ${userId} 已有迁移事件，跳过迁移`);
+                return 0;
+            }
+            
+            // 如果用户事件远少于全局事件，且没有迁移标记，则需要迁移
+            if (userEvents.length < globalEvents.length * 0.1) { // 用户事件少于全局事件的10%
+                console.log(`[数据迁移] 用户 ${userId} 事件数量(${userEvents.length})远少于全局事件(${globalEvents.length})，执行迁移`);
+                needsMigration = true;
+            } else {
+                console.log(`[数据迁移] 用户 ${userId} 已有足够事件(${userEvents.length})，跳过迁移`);
+                needsMigration = false;
+            }
+        }
+
+        if (!needsMigration) {
+            return 0;
+        }
+
+        // 为全局事件添加用户ID和迁移标记
+        const migratedEvents = globalEvents.map(event => ({
+            ...event,
+            userId: userId,
+            migrated_from_global: true,
+            migrated_at: new Date().toISOString()
+        }));
+
+        // 合并用户现有事件和迁移的事件
+        const allEvents = [...userEvents, ...migratedEvents];
+
+        // 保存到用户事件文件
+        saveJsonFile(userFilePath, allEvents);
+        
+        console.log(`[数据迁移] 成功迁移 ${migratedEvents.length} 个事件到用户 ${userId}，总事件数: ${allEvents.length}`);
+        
+        // 备份全局事件文件（不删除，以防需要恢复）
+        const backupPath = EVENTS_FILE + '.backup_' + Date.now();
+        fs.copyFileSync(EVENTS_FILE, backupPath);
+        console.log(`[数据迁移] 全局事件文件已备份到: ${backupPath}`);
+
+        return migratedEvents.length;
+    } catch (error) {
+        console.error(`[数据迁移] 迁移用户 ${userId} 的事件时出错:`, error);
+        throw error;
+    }
+}
+
+/**
+ * 迁移所有全局设置到用户设置
+ * @param {string} userId - 用户ID
+ * @returns {Object} 迁移统计信息
+ */
+function migrateGlobalSettingsToUser(userId) {
+    const migrationStats = {
+        events: 0,
+        llmSettings: false,
+        exchangeSettings: false,
+        imapSettings: false,
+        caldavSettings: false
+    };
+
+    try {
+        // 迁移事件
+        migrationStats.events = migrateGlobalEventsToUser(userId);
+
+        // 迁移LLM设置
+        if (fs.existsSync(LLM_SETTINGS_FILE)) {
+            const userLLMPath = getUserFilePath(userId, 'llm_settings.json');
+            if (!fs.existsSync(userLLMPath)) {
+                const globalLLMSettings = loadJsonFile(LLM_SETTINGS_FILE, {});
+                if (Object.keys(globalLLMSettings).length > 0) {
+                    saveJsonFile(userLLMPath, globalLLMSettings);
+                    migrationStats.llmSettings = true;
+                    console.log(`[数据迁移] LLM设置已迁移到用户 ${userId}`);
+                }
+            }
+        }
+
+        // 迁移Exchange设置
+        if (fs.existsSync(EXCHANGE_SETTINGS_FILE)) {
+            const userExchangePath = getUserFilePath(userId, 'exchange_settings.json');
+            if (!fs.existsSync(userExchangePath)) {
+                const globalExchangeSettings = loadJsonFile(EXCHANGE_SETTINGS_FILE, {});
+                if (Object.keys(globalExchangeSettings).length > 0) {
+                    saveJsonFile(userExchangePath, globalExchangeSettings);
+                    migrationStats.exchangeSettings = true;
+                    console.log(`[数据迁移] Exchange设置已迁移到用户 ${userId}`);
+                }
+            }
+        }
+
+        // 迁移IMAP设置
+        if (fs.existsSync(IMAP_SETTINGS_FILE)) {
+            const userIMAPPath = getUserFilePath(userId, 'imap_settings.json');
+            if (!fs.existsSync(userIMAPPath)) {
+                const globalIMAPSettings = loadJsonFile(IMAP_SETTINGS_FILE, {});
+                if (Object.keys(globalIMAPSettings).length > 0) {
+                    saveJsonFile(userIMAPPath, globalIMAPSettings);
+                    migrationStats.imapSettings = true;
+                    console.log(`[数据迁移] IMAP设置已迁移到用户 ${userId}`);
+                }
+            }
+        }
+
+        // 迁移CalDAV设置
+        if (fs.existsSync(CALDAV_SETTINGS_FILE)) {
+            const userCalDAVPath = getUserFilePath(userId, 'caldav_settings.json');
+            if (!fs.existsSync(userCalDAVPath)) {
+                const globalCalDAVSettings = loadJsonFile(CALDAV_SETTINGS_FILE, {});
+                if (Object.keys(globalCalDAVSettings).length > 0) {
+                    saveJsonFile(userCalDAVPath, globalCalDAVSettings);
+                    migrationStats.caldavSettings = true;
+                    console.log(`[数据迁移] CalDAV设置已迁移到用户 ${userId}`);
+                }
+            }
+        }
+
+        const hasAnyMigration = migrationStats.events > 0 || 
+                              migrationStats.llmSettings || 
+                              migrationStats.exchangeSettings || 
+                              migrationStats.imapSettings || 
+                              migrationStats.caldavSettings;
+
+        if (hasAnyMigration) {
+            console.log(`[数据迁移] 用户 ${userId} 迁移完成:`, migrationStats);
+        }
+
+        return migrationStats;
+    } catch (error) {
+        console.error(`[数据迁移] 迁移用户 ${userId} 的设置时出错:`, error);
+        throw error;
     }
 }
 
 module.exports = {
-    loadLLMSettings,
-    saveLLMSettings,
-    loadEvents,
-    saveEvents,
-    loadExchangeSettings,
-    saveExchangeSettings,
-    loadImapSettings,
-    saveImapSettings,
-    loadCalDAVSettings,
-    saveCalDAVSettings,
-    loadImapFilterSettings,
-    saveImapFilterSettings,
-    uuidv4
+    loadLLMSettings, saveLLMSettings,
+    loadEvents, saveEvents,
+    loadExchangeSettings, saveExchangeSettings,
+    loadImapSettings, saveImapSettings,
+    loadCalDAVSettings, saveCalDAVSettings,
+    loadImapFilterSettings, saveImapFilterSettings,
+    migrateGlobalEventsToUser,
+    migrateGlobalSettingsToUser,
+    uuidv4,
+    // 新增的用户目录管理函数
+    ensureUserDataDir,
+    getUserFilePath
 };
