@@ -10,18 +10,26 @@ const getCalendarApiBase = () => {
     return 'http://localhost:11001';
   }
   
-  // 检查是否在localhost环境
-  const isLocalhost = window.location.hostname === 'localhost' || 
-                     window.location.hostname === '127.0.0.1';
+  const hostname = window.location.hostname;
   
-  if (isLocalhost) {
-    // 本地开发环境，直接连接到智能日历后端
-    return 'http://localhost:11001';
+  // 检查是否是本地环境（localhost或127.0.0.1）
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  
+  // 检查是否是局域网IP地址（192.168.x.x, 10.x.x.x, 172.16-31.x.x）
+  const isPrivateIP = /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+                     /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+                     /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+  
+  if (isLocalhost || isPrivateIP) {
+    // 本地开发环境或局域网IP访问，直接连接到智能日历后端
+    console.log(`[本地设置服务] 检测到本地/局域网环境(${hostname})，使用直接连接`);
+    return `http://${hostname}:11001`;
   } else {
-    // 外网环境，使用相对路径
+    // 外网环境，使用nginx代理路径
+    console.log(`[本地设置服务] 检测到外网环境(${hostname})，使用nginx代理`);
     const protocol = window.location.protocol;
     const host = window.location.host;
-    return `${protocol}//${host}`;
+    return `${protocol}//${host}/calendars/api`;
   }
 };
 

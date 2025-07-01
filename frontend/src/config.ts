@@ -1,30 +1,37 @@
 // 后端 API 配置
-const isLocalhost = typeof window !== 'undefined' && 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
 export const getApiBaseUrl = () => {
-  let apiUrl = '';
-  
-  // 仅基于hostname判断，移除NODE_ENV检查
-  if (isLocalhost) {
-    // 本地开发环境：直接访问后端端口
-    apiUrl = 'http://localhost:11001';
-    console.log('[API Config] 使用本地API地址:', apiUrl);
-  } else {
-    // 外网环境：通过nginx代理访问
-    if (typeof window !== 'undefined') {
-      const protocol = window.location.protocol;
-      const host = window.location.host;
-      apiUrl = `${protocol}//${host}/calendars/api`;
-      console.log('[API Config] 使用外网代理API地址:', apiUrl);
-    } else {
-      // 服务端渲染时的fallback
-      apiUrl = 'http://jason.cheman.top:8081/calendars/api';
-      console.log('[API Config] 使用服务端fallback API地址:', apiUrl);
-    }
+  if (typeof window === 'undefined') {
+    // 服务端环境，使用默认地址
+    return 'http://localhost:11001';
   }
   
-  console.log('[API Config] 当前环境 - hostname:', typeof window !== 'undefined' ? window.location.hostname : 'server-side', 'NODE_ENV:', process.env.NODE_ENV, 'isLocalhost:', isLocalhost);
+  const hostname = window.location.hostname;
+  
+  // 检查是否是本地环境（localhost或127.0.0.1）
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  
+  // 检查是否是局域网IP地址（192.168.x.x, 10.x.x.x, 172.16-31.x.x）
+  const isPrivateIP = /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+                     /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+                     /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+  
+  let apiUrl = '';
+  
+  if (isLocalhost) {
+    // 本地开发环境（localhost/127.0.0.1）：使用localhost连接
+    apiUrl = 'http://localhost:11001';
+    console.log(`[API Config] 检测到本地环境(${hostname})，使用localhost连接:`, apiUrl);
+  } else if (isPrivateIP) {
+    // 局域网IP访问：使用当前IP访问后端端口
+    apiUrl = `http://${hostname}:11001`;
+    console.log(`[API Config] 检测到局域网环境(${hostname})，使用IP连接:`, apiUrl);
+  } else {
+    // 外网环境：通过nginx代理访问
+    const protocol = window.location.protocol;
+    const host = window.location.host;
+    apiUrl = `${protocol}//${host}/calendars/api`;
+    console.log(`[API Config] 检测到外网环境(${hostname})，使用nginx代理:`, apiUrl);
+  }
   
   return apiUrl;
 };

@@ -162,30 +162,49 @@ class LocalSettingsService {
     /**
      * 保存智能日历格式的LLM设置
      */
-    saveCalendarLLMSettings(calendarSettings, userId = this.defaultUserId) {
-        const provider = calendarSettings.provider;
-        
-        // 设置当前提供商
-        this.setCurrentProvider(provider);
-        
-        // 如果不是内置模型，保存提供商配置到共享目录
-        if (provider !== 'builtin' && provider !== 'builtin-free') {
-            const useCustom = calendarSettings.use_custom_model || false;
-            const providerConfig = {
-                api_key: calendarSettings.api_key,
-                base_url: calendarSettings.base_url,
-                model_name: calendarSettings.model_name, // 保持兼容性，存储当前使用的模型
-                predefined_model: useCustom ? '' : (calendarSettings.model_name || ''), // 预定义模型选择
-                custom_model: useCustom ? (calendarSettings.model_name || '') : '',     // 自定义模型名称
-                temperature: calendarSettings.temperature,
-                max_tokens: calendarSettings.max_tokens,
-                use_custom_model: useCustom
-            };
+    async saveCalendarLLMSettings(calendarSettings, userId = this.defaultUserId) {
+        try {
+            console.log('[LocalSettingsService] 开始保存LLM设置:', calendarSettings);
             
-            return this.saveLLMProviderSettings(provider, providerConfig, userId);
+            const provider = calendarSettings.provider;
+            
+            // 设置当前提供商
+            const setProviderResult = this.setCurrentProvider(provider);
+            if (!setProviderResult) {
+                console.error('[LocalSettingsService] 设置当前提供商失败');
+                throw new Error('设置当前提供商失败');
+            }
+            
+            // 如果不是内置模型，保存提供商配置到共享目录
+            if (provider !== 'builtin' && provider !== 'builtin-free') {
+                const useCustom = calendarSettings.use_custom_model || false;
+                const providerConfig = {
+                    api_key: calendarSettings.api_key,
+                    base_url: calendarSettings.base_url,
+                    model_name: calendarSettings.model_name, // 保持兼容性，存储当前使用的模型
+                    predefined_model: useCustom ? '' : (calendarSettings.model_name || ''), // 预定义模型选择
+                    custom_model: useCustom ? (calendarSettings.model_name || '') : '',     // 自定义模型名称
+                    temperature: calendarSettings.temperature,
+                    max_tokens: calendarSettings.max_tokens,
+                    use_custom_model: useCustom
+                };
+                
+                const saveResult = this.saveLLMProviderSettings(provider, providerConfig, userId);
+                if (!saveResult) {
+                    console.error('[LocalSettingsService] 保存提供商配置失败');
+                    throw new Error('保存提供商配置失败');
+                }
+                
+                console.log('[LocalSettingsService] LLM设置保存成功 - 非内置模型');
+                return saveResult;
+            }
+            
+            console.log('[LocalSettingsService] LLM设置保存成功 - 内置模型');
+            return true; // 内置模型不需要保存配置
+        } catch (error) {
+            console.error('[LocalSettingsService] 保存LLM设置失败:', error);
+            throw error; // 重新抛出错误，让上级处理
         }
-        
-        return true; // 内置模型不需要保存配置
     }
 
     /**
@@ -308,8 +327,8 @@ class LocalSettingsService {
         const defaultSettings = {
             email: '',
             password: '',
-            server: '',
-            domain: '',
+            ewsUrl: '',
+            exchangeVersion: 'Exchange2013',
             updated_at: new Date().toISOString()
         };
         
@@ -391,7 +410,7 @@ class LocalSettingsService {
         const caldavPath = path.join(this.getUserSettingsPath(userId), 'caldav.json');
         
         const defaultSettings = {
-            url: '',
+            serverUrl: '',
             username: '',
             password: '',
             updated_at: new Date().toISOString()

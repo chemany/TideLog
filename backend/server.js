@@ -161,7 +161,41 @@ async function initializeData() {
 
 // --- 中间件 ---
 app.use(cors({
-    origin: ['http://localhost:11000', 'http://127.0.0.1:11000', 'http://jason.cheman.top:11000', 'http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: function (origin, callback) {
+        // 允许的固定域名
+        const allowedOrigins = [
+            'http://localhost:11000', 
+            'http://127.0.0.1:11000', 
+            'http://jason.cheman.top:11000',
+            'http://jason.cheman.top:8081',  // 添加外网nginx代理端口
+            'http://localhost:3000', 
+            'http://127.0.0.1:3000'
+        ];
+        
+        // 如果没有origin（比如直接访问），允许
+        if (!origin) return callback(null, true);
+        
+        // 检查是否在允许列表中
+        if (allowedOrigins.includes(origin)) {
+            console.log(`[CORS] 允许预定义域名访问: ${origin}`);
+            return callback(null, true);
+        }
+        
+        // 检查是否是局域网IP地址 (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+        const urlObj = new URL(origin);
+        const hostname = urlObj.hostname;
+        const isPrivateIP = /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+                           /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+                           /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+        
+        if (isPrivateIP && (urlObj.port === '11000' || urlObj.port === '3000')) {
+            console.log(`[CORS] 允许局域网/本地IP访问: ${origin}`);
+            return callback(null, true);
+        }
+        
+        console.log(`[CORS] 拒绝未授权域名: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+    },
     credentials: true
 }));
 app.use(express.json());
@@ -504,7 +538,7 @@ app.post('/settings/llm', optionalAuth, async (req, res) => {
         });
         
         // 使用 saveCalendarLLMSettings 保存设置
-        const success = localSettingsService.saveCalendarLLMSettings(newSettings, userId);
+        const success = await localSettingsService.saveCalendarLLMSettings(newSettings, userId);
         
         if (success) {
             console.log('[LLM设置API] 设置保存成功');
@@ -523,22 +557,38 @@ app.post('/settings/llm', optionalAuth, async (req, res) => {
 
 // Exchange设置API
 app.get('/settings/exchange', optionalAuth, async (req, res) => {
-    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
+    console.log(`[Exchange设置API] 获取Exchange设置 - userId: ${userId}`);
     
     try {
         // 使用本地设置服务获取Exchange设置
-        const settings = await localSettingsService.getExchangeSettings(userToken);
+        const settings = await localSettingsService.getExchangeSettings(userId);
+        console.log(`[Exchange设置API] 读取到的设置:`, settings);
         
-        // 更新内存缓存，但不暴露密码
+        // 更新内存缓存
         exchangeSettings = { ...settings };
-        const { password, ...settingsToSend } = settings;
         
-        res.status(200).json(settingsToSend);
+        // 转换为前端期望的格式并移除密码，但添加密码状态指示
+        const frontendSettings = {
+            email: settings.email || '',
+            password: settings.password ? '********' : '', // 显示占位符表示已保存密码
+            ewsUrl: settings.ewsUrl || '',
+            exchangeVersion: settings.exchangeVersion || 'Exchange2013',
+            hasPassword: !!settings.password // 添加密码状态标识
+        };
+        console.log(`[Exchange设置API] 转换为前端格式:`, frontendSettings);
+        
+        res.status(200).json(frontendSettings);
     } catch (error) {
         console.error('[Exchange设置API] 获取设置失败:', error);
-        // 发生错误时返回本地设置（不含密码）
-        const { password, ...settingsToSend } = exchangeSettings;
-        res.status(200).json(settingsToSend);
+        // 发生错误时返回默认设置
+        res.status(200).json({
+            email: '',
+            password: '',
+            ewsUrl: '',
+            exchangeVersion: 'Exchange2013',
+            hasPassword: false
+        });
     }
 });
 
@@ -558,11 +608,11 @@ app.post('/settings/exchange', optionalAuth, async (req, res) => {
         exchangeVersion: newSettings.exchangeVersion || 'Exchange2013'
     };
     
-    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
     
     try {
         // 使用本地设置服务保存Exchange设置
-        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userToken);
+        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userId);
         
         if (success) {
             // 更新内存缓存
@@ -584,22 +634,36 @@ app.post('/settings/exchange', optionalAuth, async (req, res) => {
 
 // CalDAV设置API
 app.get('/settings/caldav', optionalAuth, async (req, res) => {
-    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
+    console.log(`[CalDAV设置API] 获取CalDAV设置 - userId: ${userId}`);
     
     try {
         // 使用本地设置服务获取CalDAV设置
-        const settings = await localSettingsService.getCalDAVSettings(userToken);
+        const settings = await localSettingsService.getCalDAVSettings(userId);
+        console.log(`[CalDAV设置API] 读取到的设置:`, settings);
         
-        // 更新内存缓存，但不暴露密码
+        // 更新内存缓存
         caldavSettings = { ...settings };
-        const { password, ...settingsToSend } = settings;
         
-        res.status(200).json(settingsToSend);
+        // 转换为前端期望的格式并移除密码，但添加密码状态指示
+        const frontendSettings = {
+            username: settings.username || '',
+            password: settings.password ? '********' : '', // 显示占位符表示已保存密码
+            serverUrl: settings.serverUrl || '',
+            hasPassword: !!settings.password // 添加密码状态标识
+        };
+        console.log(`[CalDAV设置API] 转换为前端格式:`, frontendSettings);
+        
+        res.status(200).json(frontendSettings);
     } catch (error) {
         console.error('[CalDAV设置API] 获取设置失败:', error);
-        // 发生错误时返回本地设置（不含密码）
-        const { password, ...settingsToSend } = caldavSettings;
-        res.status(200).json(settingsToSend);
+        // 发生错误时返回默认设置
+        res.status(200).json({
+            username: '',
+            password: '',
+            serverUrl: '',
+            hasPassword: false
+        });
     }
 });
 
@@ -615,11 +679,11 @@ app.post('/settings/caldav', optionalAuth, async (req, res) => {
     }
     
     const settingsToSave = { ...newSettings };
-    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
     
     try {
         // 使用本地设置服务保存CalDAV设置
-        const success = await localSettingsService.saveCalDAVSettings(settingsToSave, userToken);
+        const success = await localSettingsService.saveCalDAVSettings(settingsToSave, userId);
         
         if (success) {
             // 更新内存缓存
@@ -640,22 +704,40 @@ app.post('/settings/caldav', optionalAuth, async (req, res) => {
 
 // IMAP设置API
 app.get('/settings/imap', optionalAuth, async (req, res) => {
-    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
+    console.log(`[IMAP设置API] 获取IMAP设置 - userId: ${userId}`);
     
     try {
         // 使用本地设置服务获取IMAP设置
-        const settings = await localSettingsService.getImapSettings(userToken);
+        const settings = await localSettingsService.getImapSettings(userId);
+        console.log(`[IMAP设置API] 读取到的设置:`, settings);
         
-        // 更新内存缓存，但不暴露密码
+        // 更新内存缓存
         imapSettings = { ...settings };
-        const { password, ...settingsToSend } = settings;
         
-        res.status(200).json(settingsToSend);
+        // 转换为前端期望的格式并移除密码，但添加密码状态指示
+        const frontendSettings = {
+            email: settings.user || settings.email || '',
+            password: settings.password ? '********' : '', // 显示占位符表示已保存密码
+            imapHost: settings.host || settings.imapHost || '',
+            imapPort: settings.port || settings.imapPort || 993,
+            useTLS: settings.tls !== undefined ? settings.tls : (settings.useTLS !== undefined ? settings.useTLS : true),
+            hasPassword: !!settings.password // 添加密码状态标识
+        };
+        console.log(`[IMAP设置API] 转换为前端格式:`, frontendSettings);
+        
+        res.status(200).json(frontendSettings);
     } catch (error) {
         console.error('[IMAP设置API] 获取设置失败:', error);
-        // 发生错误时返回本地设置（不含密码）
-        const { password, ...settingsToSend } = imapSettings;
-        res.status(200).json(settingsToSend);
+        // 发生错误时返回默认设置
+        res.status(200).json({
+            email: '',
+            password: '',
+            imapHost: '',
+            imapPort: 993,
+            useTLS: true,
+            hasPassword: false
+        });
     }
 });
 
@@ -671,11 +753,11 @@ app.post('/settings/imap', optionalAuth, async (req, res) => {
     }
     
     const settingsToSave = { ...newSettings };
-    const userToken = req.user?.token;
+    const userId = getCurrentUserId(req);
     
     try {
         // 使用本地设置服务保存IMAP设置
-        const success = await localSettingsService.saveImapSettings(settingsToSave, userToken);
+        const success = await localSettingsService.saveImapSettings(settingsToSave, userId);
         
         if (success) {
             // 更新内存缓存
@@ -3974,8 +4056,10 @@ app.post('/debug/reset-imap-lock', authenticateUser, async (req, res) => {
 });
 
 // --- 启动服务器 ---
-const server = app.listen(PORT, () => {
-    console.log(`[Server] 智能日历服务器运行在端口 ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Server] 智能日历服务器运行在端口 ${PORT} (所有网络接口)`);
+    console.log(`[Server] 📍 本地访问: http://localhost:${PORT}`);
+    console.log(`[Server] 🌐 局域网访问: http://[局域网IP]:${PORT}`);
     console.log(`[Server] API endpoints:`);
     console.log(`[Server]   GET /events - 获取事件列表`);
     console.log(`[Server]   POST /events - 创建新事件`);

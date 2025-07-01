@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // 恢复basePath，nginx需要这个路径进行正确的路由
+  // 保持basePath，但修复HMR WebSocket问题
   basePath: '/calendars',
   trailingSlash: true,
 
@@ -18,6 +18,17 @@ const nextConfig: NextConfig = {
   devIndicators: {
     appIsrStatus: false, // 禁用ISR指示器
   },
+
+  // 在开发模式下优化配置
+  ...(process.env.NODE_ENV === 'development' && {
+    // 禁用一些开发模式的功能来减少错误
+    typescript: {
+      ignoreBuildErrors: false,
+    },
+    eslint: {
+      ignoreDuringBuilds: false,
+    },
+  }),
 
   // 在开发模式下禁用source map以减少404错误
   ...(process.env.NODE_ENV === 'development' && {

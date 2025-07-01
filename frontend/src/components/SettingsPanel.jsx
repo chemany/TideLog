@@ -220,6 +220,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
         setExchangeSettings(prev => ({
           ...prev,
           email: localSettings.email || '',
+          password: localSettings.password || '', // 直接使用后端返回的密码字段（可能是占位符）
           ewsUrl: localSettings.ewsUrl || '',
           exchangeVersion: localSettings.exchangeVersion || 'Exchange2013'
         }));
@@ -287,6 +288,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
         setImapSettings(prev => ({
           ...prev,
           email: localSettings.email || '',
+          password: localSettings.password || '', // 直接使用后端返回的密码字段（可能是占位符）
           imapHost: localSettings.imapHost || '',
           imapPort: localSettings.imapPort || 993,
           useTLS: localSettings.useTLS !== undefined ? localSettings.useTLS : true
@@ -389,6 +391,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
         setCaldavSettings(prev => ({
           ...prev,
           username: localSettings.username || '',
+                    password: localSettings.password || '', // 直接使用后端返回的密码字段（可能是占位符）
           serverUrl: localSettings.serverUrl || ''
         }));
       }
