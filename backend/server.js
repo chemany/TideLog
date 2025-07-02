@@ -1217,6 +1217,15 @@ app.post('/events', authenticateUser, async (req, res) => {
         await saveEvents(userEvents, userId);
         
         console.log(`[用户 ${req.user.username}] 事件已创建: "${eventToSave.title}" (${eventToSave.id})`);
+        
+        // 立即触发CalDAV同步
+        console.log(`[用户 ${req.user.username}] 开始触发事件创建后的立即CalDAV同步...`);
+        triggerImmediateCalDavSync(userId, '本地事件创建').then(syncResult => {
+            console.log(`[用户 ${req.user.username}] 事件创建后立即同步结果:`, syncResult);
+        }).catch(syncError => {
+            console.error(`[用户 ${req.user.username}] 事件创建后立即同步失败:`, syncError);
+        });
+        
         res.status(201).json(eventToSave);
     } catch (error) {
         console.error(`[用户 ${req.user.username}] 保存事件失败:`, error);
@@ -1412,67 +1421,48 @@ app.post('/test', (req, res) => {
 initializeData().then(() => {
     // 修改监听地址为0.0.0.0，允许外网访问
     // 参数说明：
-    //   PORT: 监听端口，来源于环境变量或默认8001
-    //   '0.0.0.0': 监听所有网卡（包括外网），否则仅本地可访问
-    //   安全提示：如部署在公网，建议做好防火墙和鉴权保护，避免接口被恶意访问
-    app.listen(PORT, '0.0.0.0', () => {
-        console.log(`=== 智能日历后端 ===`);
-        console.log(`服务器运行在: http://0.0.0.0:${PORT}`); // 这里显示0.0.0.0，实际可用公网IP访问
-        console.log('\n已注册路由:');
-        console.log(' - GET / (API 根路径)');
-        console.log(' - POST /events/parse-natural-language');
-        console.log(' - POST /config/llm');
-        console.log(' - GET /config/llm');
-        console.log(' - POST /config/exchange');
-        console.log(' - GET /config/exchange');
-        console.log(' - POST /config/imap');
-        console.log(' - GET /config/imap');
-        console.log(' - POST /config/caldav');
-        console.log(' - GET /config/caldav');
-        console.log(' - POST /sync/exchange (Legacy - Now QQ EWS Python only)'); // 更新说明
-        console.log(' - POST /sync/imap');
-        console.log(' - POST /sync/caldav');
-        console.log(' - POST /sync/qq-ews-python (Duplicate of /sync/exchange?)'); 
-        console.log(' - POST /sync/qq-eas (QQ ActiveSync via Node.js)'); 
-        console.log(' - POST /sync/outlook-ews (Standard EWS via Node.js)'); // <-- 添加新路由说明
-        console.log(' - POST /events');
-        console.log(' - GET /events');
-        console.log(' - PUT /events/:id');
-        console.log(' - DELETE /events/:id');
-        console.log(' - POST /events/import'); 
-        console.log(' - POST /test');
-        
-        // --- 设置定时同步任务 ---
-        // 每 30 分钟执行一次 IMAP 同步 ('*/30 * * * *')
-        cron.schedule('*/30 * * * *', () => {
-            console.log('[Cron] Triggering scheduled IMAP sync...');
-            // 检查 IMAP 配置是否存在且完整
-            if (imapSettings && imapSettings.email && imapSettings.password && imapSettings.imapHost) {
-                performImapSync().catch(err => {
-                    console.error('[Cron] Unhandled error during scheduled IMAP sync:', err);
-                });
-            } else {
-                console.log('[Cron] Skipping scheduled IMAP sync: Settings not configured.');
-            }
-        });
-
-        // 每小时执行一次 CalDAV 同步 (例如 H:05, 即每小时的第5分钟, '5 * * * *')
-        cron.schedule('5 * * * *', () => {
-             console.log('[Cron] Triggering scheduled CalDAV sync...');
-             // 检查 CalDAV 配置是否存在且完整
-             if (caldavSettings && caldavSettings.username && caldavSettings.password && caldavSettings.serverUrl) {
-                 performCalDavSync().catch(err => {
-                     console.error('[Cron] Unhandled error during scheduled CalDAV sync:', err);
-                 });
-             } else {
-                 console.log('[Cron] Skipping scheduled CalDAV sync: Settings not configured.');
-             }
-        });
-        
-        console.log('\n定时同步任务已设置:');
-        console.log(' - IMAP Sync: 每 30 分钟');
-        console.log(' - CalDAV Sync: 每小时第 5 分钟');
+    // --- 设置定时同步任务 ---
+    // 每 30 分钟执行一次 IMAP 同步 ('*/30 * * * *')
+    cron.schedule('*/30 * * * *', () => {
+        console.log('[Cron] Triggering scheduled IMAP sync...');
+        // 检查 IMAP 配置是否存在且完整
+        if (imapSettings && imapSettings.email && imapSettings.password && imapSettings.imapHost) {
+            performImapSync().catch(err => {
+                console.error('[Cron] Unhandled error during scheduled IMAP sync:', err);
+            });
+        } else {
+            console.log('[Cron] Skipping scheduled IMAP sync: Settings not configured.');
+        }
     });
+
+    // 每小时执行一次 CalDAV 同步 (例如 H:05, 即每小时的第5分钟, '5 * * * *')
+    cron.schedule('5 * * * *', async () => {
+         console.log('[Cron] Triggering scheduled CalDAV sync for default user...');
+         
+         try {
+             // 为默认用户执行CalDAV同步（TideLog主要是单用户系统）
+             const defaultUserId = localSettingsService.defaultUserId;
+             
+             // 获取默认用户的CalDAV设置
+             const userCalDAVSettings = localSettingsService.getCalDAVSettings(defaultUserId);
+             
+             // 检查是否配置了CalDAV
+             if (userCalDAVSettings && userCalDAVSettings.username && userCalDAVSettings.password && userCalDAVSettings.serverUrl) {
+                 console.log(`[Cron CalDAV] 为默认用户执行CalDAV同步...`);
+                 const syncResult = await performCalDavSyncForUser(defaultUserId);
+                 console.log(`[Cron CalDAV] 默认用户同步完成:`, syncResult.message);
+             } else {
+                 console.log(`[Cron CalDAV] 跳过定时同步，CalDAV设置未配置`);
+             }
+             
+         } catch (error) {
+             console.error('[Cron] CalDAV定时同步过程中发生错误:', error);
+         }
+    });
+    
+    console.log('\n定时同步任务已设置:');
+    console.log(' - IMAP Sync: 每 30 分钟');
+    console.log(' - CalDAV Sync: 每小时第 5 分钟');
 }).catch(error => {
     console.error("无法初始化服务器数据:", error);
     process.exit(1);
@@ -1480,6 +1470,38 @@ initializeData().then(() => {
 
 // --- 辅助函数 (getStartEndDateForSync, parseTextWithLLM, parseDateString) ---
 // ... (这些辅助函数保持不变)
+
+// --- 立即同步辅助函数 ---
+async function triggerImmediateCalDavSync(userId, eventContext = '事件创建') {
+    try {
+        console.log(`[立即同步] ${eventContext}后触发CalDAV同步，用户: ${userId}`);
+        
+        // 获取用户的CalDAV设置
+        console.log(`[立即同步] 正在获取用户 ${userId} 的CalDAV设置...`);
+        const userCalDAVSettings = localSettingsService.getCalDAVSettings(userId);
+        console.log(`[立即同步] 获取到CalDAV设置:`, {
+            hasUsername: !!userCalDAVSettings?.username,
+            hasPassword: !!userCalDAVSettings?.password,
+            hasServerUrl: !!userCalDAVSettings?.serverUrl,
+            serverUrl: userCalDAVSettings?.serverUrl
+        });
+        
+        // 检查是否配置了CalDAV
+        if (userCalDAVSettings && userCalDAVSettings.username && userCalDAVSettings.password && userCalDAVSettings.serverUrl) {
+            console.log(`[立即同步] 检测到完整CalDAV配置，开始同步到 ${userCalDAVSettings.serverUrl}`);
+            const syncResult = await performCalDavSyncForUser(userId);
+            console.log(`[立即同步] ${eventContext}后同步完成:`, syncResult.message);
+            return syncResult;
+        } else {
+            console.log(`[立即同步] 跳过同步，用户 ${userId} 的CalDAV设置不完整`);
+            console.log(`[立即同步] 配置详情:`, userCalDAVSettings);
+            return { message: '未配置CalDAV，跳过同步', skipped: true };
+        }
+    } catch (error) {
+        console.error(`[立即同步] ${eventContext}后同步失败:`, error);
+        return { message: '同步失败', error: true };
+    }
+}
 
 // --- 重构后的同步函数 --- 
 let isImapSyncRunning = false;
@@ -1948,6 +1970,11 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                 if (userId) {
                     await saveEvents(eventsDb, userId);
                     console.log(`[performImapSync] 为用户 ${userId} 保存了 ${uniqueNewEvents.length} 个新事件`);
+                    
+                    // 立即触发CalDAV同步
+                    triggerImmediateCalDavSync(userId, 'IMAP智能事件创建').catch(syncError => {
+                        console.error(`[performImapSync] IMAP事件创建后立即同步失败:`, syncError);
+                    });
                 } else {
                     globalEventsDb = eventsDb;
                     await saveEvents(eventsDb);
@@ -3615,11 +3642,12 @@ async function performCalDavSync() {
 }
 
 // --- 新增：从文档导入事件路由 ---
-app.post('/events/import', upload.single('documentFile'), async (req, res) => {
+app.post('/events/import', authenticateUser, upload.single('documentFile'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: '未上传文件。' });
     }
     const uploadedFile = req.file;
+    const userId = getCurrentUserId(req);
     console.log(`[POST /events/import] Received file: ${uploadedFile.originalname}`);
 
     let documentText = '';
@@ -3801,6 +3829,7 @@ JSON 数组结果：
                     is_all_day: true, 
                     completed: false, 
                     source: 'llm_import',
+                    userId: userId, // 添加用户ID
                     created_at: new Date().toISOString(), 
                     updated_at: new Date().toISOString(),
                     needs_caldav_push: true, // <-- 添加推送标记
@@ -3813,12 +3842,24 @@ JSON 数组结果：
         }
 
         if (newEvents.length > 0) {
-            eventsDb = [...eventsDb, ...newEvents];
-            await saveEvents(eventsDb);
-            console.log(`[Import-LLM] Successfully imported and saved ${newEvents.length} events via LLM.`);
+            // 加载用户的事件数据
+            let userEvents = await loadEvents(userId);
+            
+            // 添加新导入的事件
+            userEvents = [...userEvents, ...newEvents];
+            
+            // 保存到用户特定的文件
+            await saveEvents(userEvents, userId);
+            console.log(`[用户 ${req.user.username}] 通过LLM成功导入并保存了 ${newEvents.length} 个事件`);
+            
+            // 立即触发CalDAV同步
+            triggerImmediateCalDavSync(userId, 'LLM文档导入事件创建').catch(syncError => {
+                console.error(`[用户 ${req.user.username}] 导入事件后立即同步失败:`, syncError);
+            });
+            
             res.status(200).json({ message: `通过 LLM 成功导入 ${newEvents.length} 个事件。`, count: newEvents.length });
         } else {
-            console.log("[Import-LLM] LLM did not return any valid events.");
+            console.log(`[用户 ${req.user.username}] LLM 未返回任何有效事件`);
             res.status(200).json({ message: 'LLM 已处理文档，但未解析出任何有效事件。' , count: 0 });
         }
 

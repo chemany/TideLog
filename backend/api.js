@@ -10,7 +10,7 @@ const path = require('path');
 const localSettingsService = require('./localSettingsService');
 
 const app = express();
-const PORT = process.env.PORT || 3003;
+const PORT = process.env.API_PORT || 3003;
 
 // 中间件
 app.use(cors({
