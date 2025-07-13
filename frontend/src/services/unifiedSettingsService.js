@@ -11,6 +11,8 @@ const getUnifiedSettingsApiBase = () => {
   }
   
   const hostname = window.location.hostname;
+  const port = window.location.port;
+  const protocol = window.location.protocol;
   
   // 检查是否是本地环境（localhost或127.0.0.1）
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
@@ -25,15 +27,21 @@ const getUnifiedSettingsApiBase = () => {
     console.log(`[统一设置服务] 检测到本地环境(${hostname})，使用localhost连接`);
     return 'http://localhost:3002/api';
   } else if (isPrivateIP) {
-    // 局域网IP访问，使用当前IP连接到统一设置服务
-    console.log(`[统一设置服务] 检测到局域网环境(${hostname})，使用IP连接`);
+    // 局域网IP访问，直接连接到统一设置服务的3002端口
+    console.log(`[统一设置服务] 检测到局域网环境(${hostname})，使用IP直连`);
     return `http://${hostname}:3002/api`;
   } else {
-    // 外网环境，使用nginx代理
-    const protocol = window.location.protocol;
-    const host = window.location.host;
-    console.log(`[统一设置服务] 检测到外网环境(${hostname})，使用nginx代理`);
-    return `${protocol}//${host}/unified-settings/api`;
+    // 外网环境，检查是否通过nginx代理（通常是8081端口）
+    if (port === '8081') {
+      // nginx代理环境
+      console.log(`[统一设置服务] 检测到nginx代理环境(${hostname}:${port})，使用代理路径`);
+      return `${protocol}//${hostname}:${port}/unified-settings/api`;
+    } else {
+      // 其他外网环境，尝试直接连接（可能需要手动配置）
+      console.log(`[统一设置服务] 检测到外网环境(${hostname}:${port})，使用直连方式`);
+      console.warn(`[统一设置服务] 外网环境建议使用nginx代理(8081端口)以获得更好的性能和安全性`);
+      return `http://${hostname}:3002/api`;
+    }
   }
 };
 
