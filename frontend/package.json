@@ -1,7 +1,19 @@
 {
-  "name": "calendar-frontend",
-  "version": "0.1.0",
+  "name": "tidelog-frontend",
+  "version": "2.0.0",
+  "description": "潮汐志前端应用 - 多平台日历同步和AI助手系统",
   "private": true,
+  "keywords": [
+    "calendar",
+    "sync",
+    "ai",
+    "assistant",
+    "tidelog",
+    "react",
+    "next.js"
+  ],
+  "author": "Jason",
+  "license": "MIT",
   "scripts": {
     "dev": "next dev -p 11000",
     "dev:external": "EXTERNAL_ACCESS=true next dev -p 11000",

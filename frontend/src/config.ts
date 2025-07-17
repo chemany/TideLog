@@ -68,23 +68,7 @@ export const getAuthenticatedFetchOptions = (options: RequestInit = {}): Request
  * @returns fetch 响应
  */
 export const authenticatedFetch = (url: string, options: RequestInit = {}) => {
-  // 智能日历API不需要真实认证，因为后端使用固定用户
-  // 只有调用统一设置服务时才需要Bearer token
-  const apiBaseUrl = getApiBaseUrl();
-  const isCalendarApi = url.startsWith(apiBaseUrl);
-  
-  if (isCalendarApi) {
-    // 智能日历API：不发送认证头
-    const isFormData = options.body instanceof FormData;
-    return fetch(url, {
-      ...options,
-      headers: {
-        ...(!isFormData && { 'Content-Type': 'application/json' }),
-        ...options.headers,
-      },
-    });
-  } else {
-    // 其他API（如统一设置服务）：使用正常认证
-    return fetch(url, getAuthenticatedFetchOptions(options));
-  }
-}; 
+  // 现在所有API都需要真实认证，包括智能日历API
+  // 统一使用Bearer token进行认证
+  return fetch(url, getAuthenticatedFetchOptions(options));
+};

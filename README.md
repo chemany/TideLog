@@ -1,31 +1,34 @@
-# 📅 智能日历 (Smart Calendar)
+# 📅 潮汐志 (TideLog)
 
-多平台日历同步和AI助手系统，支持Exchange、CalDAV、IMAP等多种协议。
+多平台日历同步和AI助手系统，支持Exchange、CalDAV、IMAP等多种协议。集成统一设置服务，提供智能日程管理体验。
 
 ## ✨ 功能特性
 
 ### 📊 多平台日历同步
-- **Exchange Server** - 企业级邮件日历同步
-- **CalDAV协议** - 标准日历同步协议
-- **IMAP邮件** - 邮件日历事件提取
-- **本地日历** - 离线日历管理
+- **Exchange Server** - 企业级邮件日历同步，支持Exchange 2013+
+- **CalDAV协议** - 标准日历同步协议，兼容Google Calendar、iCloud等
+- **IMAP邮件** - 智能邮件日历事件提取和解析
+- **本地日历** - 离线日历管理，支持数据导入导出
 
 ### 🤖 AI智能助手
-- **自然语言解析** - 智能识别日程安排
-- **智能提醒** - 基于AI的个性化提醒
-- **冲突检测** - 自动检测日程冲突
-- **建议优化** - AI优化日程安排
+- **自然语言解析** - 智能识别和创建日程安排
+- **智能提醒** - 基于AI的个性化提醒和建议
+- **冲突检测** - 自动检测日程冲突并提供解决方案
+- **建议优化** - AI分析日程模式，优化时间安排
+- **多LLM支持** - 支持OpenAI、Claude、本地模型等
 
 ### 🎨 现代化界面
-- **响应式设计** - 完美适配各种设备
-- **主题切换** - 明暗主题支持
-- **拖拽操作** - 直观的日程管理
-- **多视图切换** - 月视图、周视图、日视图
+- **响应式设计** - 完美适配桌面、平板和移动设备
+- **主题切换** - 明暗主题支持，个性化界面
+- **拖拽操作** - 直观的日程拖拽编辑
+- **多视图切换** - 月视图、周视图、日视图、议程视图
 
-### 🔐 安全认证
-- **统一账号系统** - 集成统一设置服务
-- **安全存储** - 加密存储敏感信息
-- **权限管理** - 细粒度权限控制
+### 🔐 统一认证与设置
+- **统一账号系统** - 集成统一设置服务认证
+- **用户数据隔离** - 每个用户独立的日历数据存储
+- **安全存储** - 加密存储敏感信息和账户凭据
+- **权限管理** - 细粒度权限控制和访问管理
+- **USE_DEFAULT_CONFIG支持** - 智能处理默认配置标记
 
 ## 🏗️ 技术架构
 
@@ -44,10 +47,12 @@
 - **JWT** - 安全认证
 
 ### 集成服务
-- **Exchange Web Services** - Exchange服务器集成
-- **CalDAV客户端** - 标准日历协议
-- **IMAP客户端** - 邮件服务器连接
-- **统一设置服务** - 用户认证和配置管理
+- **Exchange Web Services** - Exchange服务器集成，支持EWS API
+- **CalDAV客户端** - 标准日历协议，支持多种CalDAV服务器
+- **IMAP客户端** - 邮件服务器连接，智能邮件解析
+- **统一设置服务** - 用户认证和配置管理，支持多应用集成
+- **本地设置服务** - 混合设置架构，支持本地和远程配置
+- **用户数据服务** - 用户数据隔离和管理
 
 ## 🚀 快速开始
 
@@ -91,62 +96,66 @@
    npm start
    ```
 
-5. **启动智能日历服务**
+5. **启动潮汐志服务**
    ```bash
-   # 启动后端服务 (端口3003)
-   cd ../smart-calendar/backend
-   npm run start
-   
-   # 启动前端服务 (端口3004)
+   # 启动后端服务 (端口11001)
+   cd ../TideLog/backend
+   npm start
+
+   # 启动前端服务 (端口11000)
    cd ../frontend
    npm start
    ```
 
 6. **访问应用**
-   - 前端: http://localhost:3004
-   - 后端API: http://localhost:3003
+   - 前端: http://localhost:11000/calendars/
+   - 后端API: http://localhost:11001
    - 统一设置服务: http://localhost:3002
+   - 外网访问: http://jason.cheman.top:8081/calendars/
 
 ## ⚙️ 配置说明
 
 ### 后端配置 (backend/.env)
 ```env
 # 服务配置
-PORT=3003
+PORT=11001
 NODE_ENV=development
 
 # 数据库配置
-DATABASE_URL="./data/calendar.db"
+DATABASE_PATH="./data/calendar.db"
 
 # 统一设置服务配置
 UNIFIED_SETTINGS_URL="http://localhost:3002"
 
-# Exchange配置
-EXCHANGE_SERVER_URL="https://your-exchange-server.com"
-EXCHANGE_USERNAME="your-username"
-EXCHANGE_PASSWORD="your-password"
+# 用户数据配置
+USER_DATA_PATH="C:\\code\\unified-settings-service\\user-data-v2"
+USERS_CSV_PATH="C:\\code\\unified-settings-service\\users.csv"
 
-# CalDAV配置
-CALDAV_SERVER_URL="https://your-caldav-server.com"
-CALDAV_USERNAME="your-username"
-CALDAV_PASSWORD="your-password"
+# AI模型配置
+DEFAULT_MODELS_PATH="C:\\code\\unified-settings-service\\config\\default-models.json"
 
-# IMAP配置
-IMAP_HOST="imap.your-email-provider.com"
-IMAP_PORT=993
-IMAP_USERNAME="your-email@example.com"
-IMAP_PASSWORD="your-email-password"
+# 同步配置
+SYNC_INTERVAL_MINUTES=30
+CALDAV_SYNC_MINUTE=5
+
+# 日志配置
+LOG_LEVEL="info"
 ```
 
 ### 前端配置 (frontend/.env.local)
 ```env
 # API配置
-REACT_APP_API_BASE_URL="http://localhost:3003"
+REACT_APP_API_BASE_URL="http://localhost:11001"
 REACT_APP_UNIFIED_SETTINGS_URL="http://localhost:3002"
 
 # 应用配置
-REACT_APP_APP_NAME="智能日历"
-REACT_APP_APP_VERSION="1.0.0"
+REACT_APP_APP_NAME="潮汐志"
+REACT_APP_APP_VERSION="2.0.0"
+
+# 功能开关
+REACT_APP_ENABLE_AI_ASSISTANT=true
+REACT_APP_ENABLE_NATURAL_LANGUAGE=true
+REACT_APP_ENABLE_CONFLICT_DETECTION=true
 ```
 
 ## 📖 使用指南

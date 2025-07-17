@@ -37,15 +37,30 @@ const API_BASE = getCalendarApiBase();
 
 class LocalSettingsService {
     constructor() {
-        // 本地设置服务不需要认证，使用固定用户
-        this.userId = 'cmmc03v95m7xzqxwewhjt';
+        // 本地设置服务现在需要认证，使用统一认证token
+        this.token = null;
+        this.loadToken();
+    }
+
+    // 从localStorage加载令牌
+    loadToken() {
+        if (typeof window !== 'undefined') {
+            this.token = localStorage.getItem('calendar_unified_token');
+        }
     }
 
     // 获取请求头
     getHeaders() {
-        return {
+        const headers = {
             'Content-Type': 'application/json',
         };
+
+        // 如果有token，添加Authorization头
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+
+        return headers;
     }
 
     // 处理API响应
@@ -74,8 +89,10 @@ class LocalSettingsService {
     // 获取LLM设置
     async getLLMSettings(skipAuthCheck = false) {
         try {
+            // 刷新token
+            this.loadToken();
             console.log('[本地设置服务] 获取LLM设置');
-            
+
             const response = await fetch(`${API_BASE}/settings/llm`, {
                 method: 'GET',
                 headers: this.getHeaders()
@@ -105,8 +122,10 @@ class LocalSettingsService {
     // 保存LLM设置
     async saveLLMSettings(calendarSettings) {
         try {
+            // 刷新token
+            this.loadToken();
             console.log('[本地设置服务] 保存LLM设置:', calendarSettings);
-            
+
             // 转换为后端期望的格式
             const backendSettings = this.convertToBackendFormat(calendarSettings);
             
@@ -198,8 +217,10 @@ class LocalSettingsService {
     // Exchange设置
     async getExchangeSettings(skipAuthCheck = false) {
         try {
+            // 刷新token
+            this.loadToken();
             console.log('[本地设置服务] 获取Exchange设置');
-            
+
             const response = await fetch(`${API_BASE}/settings/exchange`, {
                 method: 'GET',
                 headers: this.getHeaders()
@@ -221,8 +242,10 @@ class LocalSettingsService {
 
     async saveExchangeSettings(settings) {
         try {
+            // 刷新token
+            this.loadToken();
             console.log('[本地设置服务] 保存Exchange设置');
-            
+
             const response = await fetch(`${API_BASE}/settings/exchange`, {
                 method: 'POST',
                 headers: this.getHeaders(),
@@ -241,8 +264,10 @@ class LocalSettingsService {
     // CalDAV设置
     async getCalDAVSettings(skipAuthCheck = false) {
         try {
+            // 刷新token
+            this.loadToken();
             console.log('[本地设置服务] 获取CalDAV设置');
-            
+
             const response = await fetch(`${API_BASE}/settings/caldav`, {
                 method: 'GET',
                 headers: this.getHeaders()
@@ -283,8 +308,10 @@ class LocalSettingsService {
     // IMAP设置
     async getIMAPSettings(skipAuthCheck = false) {
         try {
+            // 刷新token
+            this.loadToken();
             console.log('[本地设置服务] 获取IMAP设置');
-            
+
             const response = await fetch(`${API_BASE}/settings/imap`, {
                 method: 'GET',
                 headers: this.getHeaders()

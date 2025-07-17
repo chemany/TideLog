@@ -49,7 +49,7 @@ class HybridSettingsService {
     
     async getLLMSettings(skipAuthCheck = false) {
         console.log('[混合设置服务] 使用本地设置服务获取LLM设置');
-        
+
         // 如果不跳过认证检查，先确保用户已认证
         if (!skipAuthCheck) {
             const isAuthenticated = await this.ensureAuthenticated();
@@ -57,20 +57,20 @@ class HybridSettingsService {
                 throw new Error('用户未认证');
             }
         }
-        
-        return await this.settingsService.getLLMSettings(true); // 跳过本地服务的认证检查
+
+        return await this.settingsService.getLLMSettings(true); // 使用本地设置服务
     }
 
     async saveLLMSettings(settings) {
         console.log('[混合设置服务] 使用本地设置服务保存LLM设置');
-        
+
         // 确保用户已认证
         const isAuthenticated = await this.ensureAuthenticated();
         if (!isAuthenticated) {
             throw new Error('用户未认证');
         }
-        
-        return await this.settingsService.saveLLMSettings(settings);
+
+        return await this.settingsService.saveLLMSettings(settings); // 使用本地设置服务
     }
 
     async getExchangeSettings(skipAuthCheck = false) {

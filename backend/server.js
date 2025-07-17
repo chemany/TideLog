@@ -32,12 +32,15 @@ const {
     loadImapFilterSettings, saveImapFilterSettings, // <-- 添加新的导入
     migrateGlobalEventsToUser,
     migrateGlobalSettingsToUser,
+    cleanupMigratedEvents,
     uuidv4
 } = require('./storage');
 // 导入认证中间件
 const { authenticateUser, optionalAuth, getCurrentUserId, isAuthenticated } = require('./auth');
 // 导入本地设置服务（替代统一设置客户端和设置管理器）
 const localSettingsService = require('./localSettingsService');
+// 导入新的设置服务
+const newSettingsService = require('./newSettingsService');
 // --- 导入新的 EAS 同步函数 ---
 const { syncQQViaEAS } = require('./eas_sync'); 
 const { syncOutlookViaEWS } = require('./outlook_ews_sync'); // <-- 导入新的 Outlook EWS 同步函数
@@ -112,11 +115,15 @@ function forceResetLlmCache() {
 async function initializeData() {
     // 使用新的设置管理器加载所有设置
     console.log('[初始化] 开始加载应用设置...');
-    
+
     try {
+        // 使用默认系统用户ID加载设置
+        const systemUserId = 'cmmc03v95m7xzqxwewhjt'; // 系统默认用户ID
+        console.log(`[初始化] 使用系统用户ID: ${systemUserId} 加载默认设置`);
+
         // 批量获取所有设置（从本地设置服务）
-        const allSettings = await localSettingsService.getAllSettings();
-        
+        const allSettings = await localSettingsService.getAllSettings(systemUserId);
+
         llmSettings = allSettings.llm;
         exchangeSettings = allSettings.exchange;
         imapSettings = allSettings.imap;
@@ -209,25 +216,46 @@ app.use((req, res, next) => {
 // --- 基础路由 ---
 app.get('/', (req, res) => { res.json({ message: '智能日历API - Node.js后端' }); });
 
+// 健康检查端点（不需要认证）
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        service: 'TideLog后端服务',
+        port: PORT,
+        version: '1.0.0'
+    });
+});
+
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        service: 'TideLog后端服务',
+        port: PORT,
+        version: '1.0.0'
+    });
+});
+
 // --- LLM配置路由 ---
-app.post('/config/llm', optionalAuth, async (req, res) => {
+app.post('/config/llm', authenticateUser, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || !newSettings.provider) {
         return res.status(400).json({ error: '无效的LLM设置格式。' });
     }
-    
-    const userToken = req.user?.token;
-    
+
+    const userId = getCurrentUserId(req);
+
     try {
         // 如果前端没有发送API Key（部分更新），则先获取现有设置
         let settingsToSave = { ...newSettings };
         if (!newSettings.api_key) {
-            const existingSettings = await localSettingsService.getLLMSettings(userToken);
+            const existingSettings = await localSettingsService.getLLMSettings(userId);
             settingsToSave.api_key = existingSettings.api_key || '';
         }
-        
+
         // 使用本地设置服务保存LLM设置
-        const success = await localSettingsService.saveLLMSettings(settingsToSave, userToken);
+        const success = await localSettingsService.saveLLMSettings(settingsToSave, userId);
         
         if (success) {
             // 更新内存缓存
@@ -246,12 +274,12 @@ app.post('/config/llm', optionalAuth, async (req, res) => {
     }
 });
 
-app.get('/config/llm', optionalAuth, async (req, res) => {
-    const userToken = req.user?.token;
-    
+app.get('/config/llm', authenticateUser, async (req, res) => {
+    const userId = getCurrentUserId(req);
+
     try {
         // 使用本地设置服务获取LLM设置
-        const settings = await localSettingsService.getLLMSettings(userToken);
+        const settings = await localSettingsService.getLLMSettings(userId);
         
         // 更新内存缓存
         llmSettings = { ...settings };
@@ -268,10 +296,13 @@ app.get('/config/llm', optionalAuth, async (req, res) => {
 app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
     const provider = req.params.provider;
     const userToken = req.user?.token;
-    
+
     try {
+        // 获取用户ID，如果没有认证则使用系统默认ID
+        const userId = req.user?.userId || 'system-default';
+
         // 获取共享LLM设置
-        const sharedSettings = localSettingsService.getSharedLLMSettings();
+        const sharedSettings = localSettingsService.getSharedLLMSettings(userId);
         const providerConfig = sharedSettings.providers[provider];
         
         if (providerConfig) {
@@ -316,12 +347,12 @@ app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
 });
 
 // --- Exchange配置路由 ---
-app.post('/config/exchange', optionalAuth, async (req, res) => {
+app.post('/config/exchange', authenticateUser, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || typeof newSettings.email !== 'string' || typeof newSettings.password !== 'string') {
         return res.status(400).json({ error: '无效的Exchange设置格式。必需: email, password。' });
     }
-    
+
     // 当前支持的可选参数: ewsUrl, exchangeVersion
     const validatedSettings = {
         email: newSettings.email,
@@ -331,12 +362,12 @@ app.post('/config/exchange', optionalAuth, async (req, res) => {
         // 可选的 Exchange 版本 (默认 Exchange2013)
         exchangeVersion: newSettings.exchangeVersion || 'Exchange2013'
     };
-    
-    const userToken = req.user?.token;
-    
+
+    const userId = getCurrentUserId(req);
+
     try {
         // 使用本地设置服务保存Exchange设置
-        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userToken);
+        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userId);
         
         if (success) {
             // 更新内存缓存
@@ -356,12 +387,12 @@ app.post('/config/exchange', optionalAuth, async (req, res) => {
     }
 });
 
-app.get('/config/exchange', optionalAuth, async (req, res) => {
-    const userToken = req.user?.token;
-    
+app.get('/config/exchange', authenticateUser, async (req, res) => {
+    const userId = getCurrentUserId(req);
+
     try {
         // 使用本地设置服务获取Exchange设置
-        const settings = await localSettingsService.getExchangeSettings(userToken);
+        const settings = await localSettingsService.getExchangeSettings(userId);
         
         // 更新内存缓存，但不暴露密码
         exchangeSettings = { ...settings };
@@ -392,8 +423,10 @@ app.post('/config/imap', optionalAuth, async (req, res) => {
     const userToken = req.user?.token;
     
     try {
-        // 使用本地设置服务保存IMAP设置
-        const success = await localSettingsService.saveImapSettings(settingsToSave, userToken);
+        // 使用新的设置服务保存IMAP设置
+        const userId = getCurrentUserId(req);
+        const userInfo = { username: req.user?.username, email: req.user?.email };
+        const success = await newSettingsService.saveImapSettings(settingsToSave, userId, userInfo);
         
         if (success) {
             // 更新内存缓存
@@ -491,12 +524,11 @@ app.get('/config/caldav', optionalAuth, async (req, res) => {
 // --- 设置API路由（用于前端混合服务） ---
 
 // LLM设置API
-app.get('/settings/llm', optionalAuth, async (req, res) => {
-    const userToken = req.user?.token;
+app.get('/settings/llm', authenticateUser, async (req, res) => {
     const userId = getCurrentUserId(req);
-    
+
     try {
-        console.log('[LLM设置API] 获取前端安全配置');
+        console.log('[LLM设置API] 获取前端安全配置，用户ID:', userId);
         // 返回前端安全版本的LLM设置（包含占位符）
         const settings = localSettingsService.getCalendarLLMSettings(userId);
         
@@ -521,33 +553,34 @@ app.get('/settings/llm', optionalAuth, async (req, res) => {
     }
 });
 
-app.post('/settings/llm', optionalAuth, async (req, res) => {
+app.post('/settings/llm', authenticateUser, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || !newSettings.provider) {
         return res.status(400).json({ error: '无效的LLM设置格式。' });
     }
-    
-    const userToken = req.user?.token;
+
     const userId = getCurrentUserId(req);
-    
+
     try {
-        console.log('[LLM设置API] 保存设置请求:', { 
+        console.log('[LLM设置API] 保存设置请求，用户ID:', userId, '设置:', {
             provider: newSettings.provider,
+            model_name: newSettings.model_name,
             hasApiKey: !!newSettings.api_key,
             apiKeyType: newSettings.api_key === 'BUILTIN_PROXY' ? 'placeholder' : 'actual'
         });
-        
-        // 使用 saveCalendarLLMSettings 保存设置
-        const success = await localSettingsService.saveCalendarLLMSettings(newSettings, userId);
-        
+
+        // 使用新的设置服务保存LLM设置（与CalDAV/IMAP保持一致）
+        const userInfo = { username: req.user.username, email: req.user.email };
+        const success = await newSettingsService.saveLLMSettings(newSettings, userId, userInfo);
+
         if (success) {
             console.log('[LLM设置API] 设置保存成功');
-            res.status(200).json({ 
+            res.status(200).json({
                 message: 'LLM设置已保存。',
-                syncedToUnified: false // 智能日历使用本地设置
+                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
             });
         } else {
-            throw new Error('本地设置服务保存失败');
+            throw new Error('设置管理器保存失败');
         }
     } catch (error) {
         console.error("[LLM设置API] 保存失败:", error);
@@ -556,13 +589,14 @@ app.post('/settings/llm', optionalAuth, async (req, res) => {
 });
 
 // Exchange设置API
-app.get('/settings/exchange', optionalAuth, async (req, res) => {
+app.get('/settings/exchange', authenticateUser, async (req, res) => {
     const userId = getCurrentUserId(req);
     console.log(`[Exchange设置API] 获取Exchange设置 - userId: ${userId}`);
     
     try {
-        // 使用本地设置服务获取Exchange设置
-        const settings = await localSettingsService.getExchangeSettings(userId);
+        // 使用新的设置服务获取Exchange设置
+        const userInfo = { username: req.user.username, email: req.user.email };
+        const settings = await newSettingsService.getExchangeSettings(userId, userInfo);
         console.log(`[Exchange设置API] 读取到的设置:`, settings);
         
         // 更新内存缓存
@@ -592,7 +626,7 @@ app.get('/settings/exchange', optionalAuth, async (req, res) => {
     }
 });
 
-app.post('/settings/exchange', optionalAuth, async (req, res) => {
+app.post('/settings/exchange', authenticateUser, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || typeof newSettings.email !== 'string' || typeof newSettings.password !== 'string') {
         return res.status(400).json({ error: '无效的Exchange设置格式。必需: email, password。' });
@@ -633,13 +667,14 @@ app.post('/settings/exchange', optionalAuth, async (req, res) => {
 });
 
 // CalDAV设置API
-app.get('/settings/caldav', optionalAuth, async (req, res) => {
+app.get('/settings/caldav', authenticateUser, async (req, res) => {
     const userId = getCurrentUserId(req);
     console.log(`[CalDAV设置API] 获取CalDAV设置 - userId: ${userId}`);
-    
+
     try {
-        // 使用本地设置服务获取CalDAV设置
-        const settings = await localSettingsService.getCalDAVSettings(userId);
+        // 使用新的设置服务获取CalDAV设置
+        const userInfo = { username: req.user.username, email: req.user.email };
+        const settings = await newSettingsService.getCalDAVSettings(userId, userInfo);
         console.log(`[CalDAV设置API] 读取到的设置:`, settings);
         
         // 更新内存缓存
@@ -667,23 +702,36 @@ app.get('/settings/caldav', optionalAuth, async (req, res) => {
     }
 });
 
-app.post('/settings/caldav', optionalAuth, async (req, res) => {
+app.post('/settings/caldav', authenticateUser, async (req, res) => {
     const newSettings = req.body;
-    if (!newSettings || 
-        typeof newSettings.username !== 'string' || 
+    if (!newSettings ||
+        typeof newSettings.username !== 'string' ||
         typeof newSettings.password !== 'string' ||
         typeof newSettings.serverUrl !== 'string') {
-        return res.status(400).json({ 
-            error: '无效的CalDAV设置格式。必需: username, password, serverUrl' 
+        return res.status(400).json({
+            error: '无效的CalDAV设置格式。必需: username, password, serverUrl'
         });
     }
-    
-    const settingsToSave = { ...newSettings };
+
     const userId = getCurrentUserId(req);
+    let settingsToSave = { ...newSettings };
+
+    // 如果密码是屏蔽符号，保持原有密码不变
+    if (newSettings.password === '********') {
+        try {
+            const existingSettings = await localSettingsService.getCalDAVSettings(userId);
+            settingsToSave.password = existingSettings.password || '';
+            console.log(`[CalDAV设置API] 保持原有密码不变`);
+        } catch (error) {
+            console.error('[CalDAV设置API] 获取现有设置失败:', error);
+            return res.status(500).json({ error: '无法获取现有设置' });
+        }
+    }
     
     try {
-        // 使用本地设置服务保存CalDAV设置
-        const success = await localSettingsService.saveCalDAVSettings(settingsToSave, userId);
+        // 使用新的设置服务保存CalDAV设置
+        const userInfo = { username: req.user.username, email: req.user.email };
+        const success = await newSettingsService.saveCalDAVSettings(settingsToSave, userId, userInfo);
         
         if (success) {
             // 更新内存缓存
@@ -703,13 +751,14 @@ app.post('/settings/caldav', optionalAuth, async (req, res) => {
 });
 
 // IMAP设置API
-app.get('/settings/imap', optionalAuth, async (req, res) => {
+app.get('/settings/imap', authenticateUser, async (req, res) => {
     const userId = getCurrentUserId(req);
     console.log(`[IMAP设置API] 获取IMAP设置 - userId: ${userId}`);
     
     try {
-        // 使用本地设置服务获取IMAP设置
-        const settings = await localSettingsService.getImapSettings(userId);
+        // 使用新的设置服务获取IMAP设置
+        const userInfo = { username: req.user.username, email: req.user.email };
+        const settings = await newSettingsService.getImapSettings(userId, userInfo);
         console.log(`[IMAP设置API] 读取到的设置:`, settings);
         
         // 更新内存缓存
@@ -741,7 +790,7 @@ app.get('/settings/imap', optionalAuth, async (req, res) => {
     }
 });
 
-app.post('/settings/imap', optionalAuth, async (req, res) => {
+app.post('/settings/imap', authenticateUser, async (req, res) => {
     const newSettings = req.body;
     if (!newSettings || 
         typeof newSettings.email !== 'string' || 
@@ -756,8 +805,9 @@ app.post('/settings/imap', optionalAuth, async (req, res) => {
     const userId = getCurrentUserId(req);
     
     try {
-        // 使用本地设置服务保存IMAP设置
-        const success = await localSettingsService.saveImapSettings(settingsToSave, userId);
+        // 使用新的设置服务保存IMAP设置
+        const userInfo = { username: req.user.username, email: req.user.email };
+        const success = await newSettingsService.saveImapSettings(settingsToSave, userId, userInfo);
         
         if (success) {
             // 更新内存缓存
@@ -1237,15 +1287,18 @@ app.get('/events', authenticateUser, async (req, res) => {
     try {
         const userId = getCurrentUserId(req);
         
-        // 自动检查并迁移全局数据到用户目录
+        // 数据迁移已禁用 - 确保用户数据隔离
+        // 每个用户只能看到自己的事件，不会从全局数据迁移
+        console.log(`[用户 ${req.user.username}] 跳过数据迁移，确保用户数据隔离`);
+
+        // 清理已迁移的事件（一次性操作）
         try {
-            const migrationStats = migrateGlobalSettingsToUser(userId);
-            if (migrationStats.events > 0) {
-                console.log(`[用户 ${req.user.username}] 自动迁移完成，恢复了 ${migrationStats.events} 个事件`);
+            const cleanupStats = cleanupMigratedEvents(userId);
+            if (cleanupStats.removed > 0) {
+                console.log(`[用户 ${req.user.username}] 清理了 ${cleanupStats.removed} 个迁移事件，保留 ${cleanupStats.kept} 个用户事件`);
             }
-        } catch (migrationError) {
-            console.error(`[用户 ${req.user.username}] 数据迁移失败:`, migrationError);
-            // 迁移失败不影响正常事件获取
+        } catch (cleanupError) {
+            console.error(`[用户 ${req.user.username}] 清理迁移事件失败:`, cleanupError);
         }
         
         const userEvents = await loadEvents(userId);
@@ -2129,8 +2182,10 @@ async function performCalDavSyncForUser(userId) {
     console.log(`[performCalDavSyncForUser] Starting CalDAV sync for user ${userId}...`);
     
     try {
-        // 加载用户特定的CalDAV设置
-        const userCalDAVSettings = await loadCalDAVSettings(userId);
+        // 加载用户特定的CalDAV设置（使用新的设置服务）
+        console.log(`[performCalDavSyncForUser] 使用新设置服务加载CalDAV设置，用户ID: ${userId}`);
+        const userCalDAVSettings = await newSettingsService.getCalDAVSettings(userId);
+        console.log(`[performCalDavSyncForUser] 加载到的CalDAV设置:`, userCalDAVSettings);
         
         // 检查CalDAV设置是否已配置
         if (!userCalDAVSettings || !userCalDAVSettings.username || !userCalDAVSettings.password || !userCalDAVSettings.serverUrl) {
@@ -2168,6 +2223,10 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
         if (!targetServerUrl.startsWith('http')) targetServerUrl = 'https://' + targetServerUrl;
         if (!targetServerUrl.endsWith('/')) targetServerUrl += '/';
         
+        console.log(`[performQQCalDavSyncForUser] 准备连接CalDAV服务器: ${targetServerUrl}`);
+        console.log(`[performQQCalDavSyncForUser] 用户名: ${userCalDAVSettings.username}`);
+        console.log(`[performQQCalDavSyncForUser] 密码长度: ${userCalDAVSettings.password ? userCalDAVSettings.password.length : 0}`);
+
         const client = new DAVClient({
             serverUrl: targetServerUrl,
             credentials: {
@@ -3871,12 +3930,13 @@ JSON 数组结果：
 
 // --- CalDAV 同步路由 (最终定义) ---
 app.post('/sync/caldav', authenticateUser, async (req, res) => {
-    console.log(`[POST /sync/caldav] 用户 ${req.user.username} (${req.user.id}) 触发CalDAV同步...`);
-    
+    const userId = getCurrentUserId(req);
+    console.log(`[POST /sync/caldav] 用户 ${req.user.username} (原始ID: ${req.user.id}, 映射ID: ${userId}) 触发CalDAV同步...`);
+
     let syncResult;
     try {
         // 调用用户特定的 CalDAV 同步函数
-        syncResult = await performCalDavSyncForUser(req.user.id); 
+        syncResult = await performCalDavSyncForUser(userId);
         console.log("[/sync/caldav Route] performCalDavSyncForUser finished. Raw result:", syncResult);
 
         // 检查返回结果的结构
@@ -3919,20 +3979,22 @@ app.post('/sync/caldav', authenticateUser, async (req, res) => {
 // --- IMAP Filter 配置路由 ---
 app.get('/config/imap-filter', optionalAuth, async (req, res) => {
     try {
-        const userToken = req.user?.token;
-        
-        // 使用设置管理器获取IMAP过滤设置（支持用户特定设置）
-        const settings = await localSettingsService.getImapFilterSettings(userToken);
-        
-                // 更新内存缓存
+        const userId = getCurrentUserId(req);
+        const userInfo = { username: req.user?.username, email: req.user?.email };
+
+        // 使用新的设置服务获取IMAP过滤设置
+        const settings = await newSettingsService.getImapFilterSettings(userId, userInfo);
+
+        // 更新内存缓存
         imapFilterSettings = { ...settings };
         console.log('[IMAP Filter配置] 获取设置成功:', imapFilterSettings);
-        
+
         res.status(200).json(imapFilterSettings);
     } catch (error) {
         console.error('获取IMAP过滤器设置失败:', error);
-        // 发生错误时返回本地设置
-        res.status(200).json(imapFilterSettings);
+        // 发生错误时返回默认设置
+        const defaultSettings = { sender_allowlist: [] };
+        res.status(200).json(defaultSettings);
     }
 });
 
@@ -3948,11 +4010,12 @@ app.post('/config/imap-filter', optionalAuth, async (req, res) => {
         .filter(email => email.length > 0);
 
     const settingsToSave = { sender_allowlist: cleanedAllowlist };
-    const userToken = req.user?.token;
-    
+    const userId = getCurrentUserId(req);
+    const userInfo = { username: req.user?.username, email: req.user?.email };
+
     try {
-        // 使用设置管理器保存IMAP过滤设置
-        const success = await localSettingsService.saveImapFilterSettings(settingsToSave, userToken);
+        // 使用新的设置服务保存IMAP过滤设置
+        const success = await newSettingsService.saveImapFilterSettings(settingsToSave, userId, userInfo);
         
         if (success) {
             // 更新内存缓存
@@ -3985,11 +4048,26 @@ app.post('/sync/imap', authenticateUser, async (req, res) => {
         const userId = getCurrentUserId(req);
         let userImapSettings;
         try {
-            userImapSettings = localSettingsService.getImapSettings(userId);
-            console.log('[/sync/imap] 用户IMAP设置:', { 
-                email: userImapSettings.email, 
+            // 使用新的设置服务获取IMAP设置
+            const userInfo = { username: req.user.username, email: req.user.email };
+            const settings = await newSettingsService.getImapSettings(userId, userInfo);
+
+            // 转换新设置服务格式到IMAP同步期望的格式
+            userImapSettings = {
+                email: settings.email,
+                imapHost: settings.imapHost,
+                password: settings.password,
+                imapPort: settings.imapPort,
+                useTLS: settings.useTLS,
+                // 保持向后兼容的字段名
+                user: settings.email,
+                host: settings.imapHost
+            };
+
+            console.log('[/sync/imap] 用户IMAP设置:', {
+                email: userImapSettings.email,
                 host: userImapSettings.host,
-                hasPassword: !!userImapSettings.password 
+                hasPassword: !!userImapSettings.password
             });
         } catch (error) {
             console.error('[/sync/imap] 获取用户IMAP设置失败:', error);

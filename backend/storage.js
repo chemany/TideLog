@@ -56,6 +56,63 @@ function ensureUserDataDir(userId) {
 }
 
 /**
+ * 根据用户ID获取用户名（从新的用户数据服务）
+ * @param {string} userId - 用户ID
+ * @returns {string} 用户名，如果找不到则返回用户ID
+ */
+function getUsernameFromId(userId) {
+    try {
+        const csvPath = 'C:\\code\\unified-settings-service\\user-data-v2\\users.csv';
+
+        if (!fs.existsSync(csvPath)) {
+            console.log(`[Storage] CSV文件不存在，使用用户ID作为文件名: ${csvPath}`);
+            return userId;
+        }
+
+        const csvData = fs.readFileSync(csvPath, 'utf8');
+        const lines = csvData.trim().split('\n');
+
+        if (lines.length <= 1) {
+            console.log(`[Storage] CSV文件为空，使用用户ID作为文件名`);
+            return userId;
+        }
+
+        // 跳过表头，查找用户
+        for (let i = 1; i < lines.length; i++) {
+            const columns = lines[i].split(',');
+            if (columns.length >= 2 && columns[0] === userId) {
+                const username = columns[1];
+                console.log(`[Storage] 找到用户名: ${userId} -> ${username}`);
+                return username;
+            }
+        }
+
+        console.log(`[Storage] 未找到用户ID ${userId} 对应的用户名，使用用户ID作为文件名`);
+        return userId;
+    } catch (error) {
+        console.error(`[Storage] 获取用户名失败，使用用户ID作为文件名:`, error);
+        return userId;
+    }
+}
+
+/**
+ * 获取用户事件文件路径（使用用户名命名）
+ * @param {string} userId - 用户ID
+ * @returns {string} 事件文件路径
+ */
+function getUserEventsFilePath(userId) {
+    try {
+        ensureDataDir();
+        const username = getUsernameFromId(userId);
+        return path.join(USERS_DATA_DIR, `${username}_events.json`);
+    } catch (error) {
+        console.error(`[Storage] 获取用户事件文件路径失败:`, error);
+        // 回退到旧的方式
+        return getUserFilePath(userId, 'events_db.json');
+    }
+}
+
+/**
  * 获取用户特定文件路径
  * @param {string} userId - 用户ID
  * @param {string} filename - 文件名
@@ -269,16 +326,35 @@ function saveLLMSettings(settings, userId = null) {
  */
 function loadEvents(userId = null) {
     const defaultEvents = [];
-    
+
     let events;
     if (userId) {
-        const userFilePath = getUserFilePath(userId, 'events_db.json');
-        events = loadJsonFile(userFilePath, defaultEvents);
+        // 优先使用新的简化文件路径（用户名命名）
+        const newFilePath = getUserEventsFilePath(userId);
+
+        // 如果新文件存在，使用新文件
+        if (fs.existsSync(newFilePath)) {
+            console.log(`[Storage] 使用简化文件路径加载事件: ${newFilePath}`);
+            events = loadJsonFile(newFilePath, defaultEvents);
+        } else {
+            // 否则尝试从旧文件路径加载
+            const oldFilePath = getUserFilePath(userId, 'events_db.json');
+            if (fs.existsSync(oldFilePath)) {
+                console.log(`[Storage] 从旧文件路径加载事件: ${oldFilePath}`);
+                events = loadJsonFile(oldFilePath, defaultEvents);
+
+                // 自动迁移到新文件路径
+                console.log(`[Storage] 自动迁移事件数据到新文件路径: ${newFilePath}`);
+                saveJsonFile(newFilePath, events);
+            } else {
+                events = defaultEvents;
+            }
+        }
     } else {
         // 向后兼容：无用户ID时使用全局文件
         events = loadJsonFile(EVENTS_FILE, defaultEvents);
     }
-    
+
     return events.map(event => ({
         ...event,
         completed: event.completed === true
@@ -292,8 +368,10 @@ function loadEvents(userId = null) {
  */
 function saveEvents(events, userId = null) {
     if (userId) {
-        const userFilePath = getUserFilePath(userId, 'events_db.json');
-        saveJsonFile(userFilePath, events);
+        // 使用新的简化文件路径（用户名命名）
+        const newFilePath = getUserEventsFilePath(userId);
+        console.log(`[Storage] 保存事件到简化文件路径: ${newFilePath}`);
+        saveJsonFile(newFilePath, events);
     } else {
         // 向后兼容：无用户ID时保存到全局文件
         saveJsonFile(EVENTS_FILE, events);
@@ -559,6 +637,59 @@ function migrateGlobalEventsToUser(userId) {
 }
 
 /**
+ * 清理用户的迁移事件，只保留用户自己创建的事件
+ * @param {string} userId - 用户ID
+ * @returns {Object} 清理统计信息
+ */
+function cleanupMigratedEvents(userId) {
+    const stats = {
+        removed: 0,
+        kept: 0
+    };
+
+    try {
+        const userFilePath = getUserFilePath(userId, 'events_db.json');
+
+        if (!fs.existsSync(userFilePath)) {
+            console.log(`[清理迁移事件] 用户 ${userId} 事件文件不存在`);
+            return stats;
+        }
+
+        const userEvents = loadJsonFile(userFilePath, []);
+        if (userEvents.length === 0) {
+            console.log(`[清理迁移事件] 用户 ${userId} 无事件需要清理`);
+            return stats;
+        }
+
+        // 分离迁移事件和用户事件
+        const userOwnEvents = [];
+        const migratedEvents = [];
+
+        userEvents.forEach(event => {
+            if (event.migrated_from_global) {
+                migratedEvents.push(event);
+            } else {
+                userOwnEvents.push(event);
+            }
+        });
+
+        stats.removed = migratedEvents.length;
+        stats.kept = userOwnEvents.length;
+
+        if (stats.removed > 0) {
+            // 只保存用户自己的事件
+            saveJsonFile(userFilePath, userOwnEvents);
+            console.log(`[清理迁移事件] 用户 ${userId} 清理完成: 移除 ${stats.removed} 个迁移事件，保留 ${stats.kept} 个用户事件`);
+        }
+
+        return stats;
+    } catch (error) {
+        console.error(`[清理迁移事件] 用户 ${userId} 清理失败:`, error);
+        throw error;
+    }
+}
+
+/**
  * 迁移所有全局设置到用户设置
  * @param {string} userId - 用户ID
  * @returns {Object} 迁移统计信息
@@ -654,6 +785,7 @@ module.exports = {
     loadImapFilterSettings, saveImapFilterSettings,
     migrateGlobalEventsToUser,
     migrateGlobalSettingsToUser,
+    cleanupMigratedEvents,
     uuidv4,
     // 新增的用户目录管理函数
     ensureUserDataDir,

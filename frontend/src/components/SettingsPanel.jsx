@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import hybridSettingsService from '../services/hybridSettingsService';
-import { getApiBaseUrl } from '../config';
+import { getApiBaseUrl, authenticatedFetch } from '../config';
 
 const SettingsPanel = ({ open, onClose, refreshEvents }) => {
   const [activeTab, setActiveTab] = useState('llm');
@@ -264,7 +264,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
     }
 
     try {
-      const response = await fetch(syncUrl, { method: 'POST' });
+      const response = await authenticatedFetch(syncUrl, { method: 'POST' });
       const data = await response.json();
 
       if (response.ok) {
@@ -322,7 +322,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
       setImapError('');
       setIsSyncingIMAP(true);
 
-      const response = await fetch(`${getApiBaseUrl()}/sync/imap`, {
+      const response = await authenticatedFetch(`${getApiBaseUrl()}/sync/imap`, {
         method: 'POST'
       });
 
@@ -344,7 +344,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
   };  // IMAP Filter Settings Handlers
   const loadImapFilterSettings = useCallback(async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/config/imap-filter`);
+      const response = await authenticatedFetch(`${getApiBaseUrl()}/config/imap-filter`);
       if (response.ok) {
         const data = await response.json();
         setImapAllowlist(data.sender_allowlist || []);
@@ -358,7 +358,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
     setImapFilterMessage('');
     setImapFilterError('');
     try {
-      const response = await fetch(`${getApiBaseUrl()}/config/imap-filter`, {
+      const response = await authenticatedFetch(`${getApiBaseUrl()}/config/imap-filter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sender_allowlist: imapAllowlist })
@@ -422,7 +422,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
     setCaldavError('');
     setIsSyncingCalDAV(true);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/sync/caldav`, {
+      const response = await authenticatedFetch(`${getApiBaseUrl()}/sync/caldav`, {
         method: 'POST'
       });
       const data = await response.json();

@@ -12,12 +12,9 @@ class LocalSettingsService {
         this.settingsBasePath = 'C:\\code\\unified-settings-service\\user-settings';
         this.defaultModelsPath = 'C:\\code\\unified-settings-service\\config\\default-models.json';
         this.localDataPath = path.join(__dirname, 'data');
-        
+
         // 确保本地数据目录存在
         this.ensureDirectory(this.localDataPath);
-        
-        // 固定用户ID，与灵枢笔记保持一致
-        this.defaultUserId = 'cmmc03v95m7xzqxwewhjt';
     }
 
     /**
@@ -31,15 +28,31 @@ class LocalSettingsService {
 
     /**
      * 获取用户设置目录
+     * @param {string} userId 用户ID，必须提供
      */
-    getUserSettingsPath(userId = this.defaultUserId) {
+    getUserSettingsPath(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         return path.join(this.settingsBasePath, userId);
     }
 
     /**
      * 确保用户设置目录存在
+     * @param {string} userId 用户ID，必须提供
      */
-    ensureUserDirectory(userId = this.defaultUserId) {
+    ensureUserDirectory(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
+
+        // 检查新用户数据管理系统是否存在
+        const newSystemPath = 'C:\\code\\unified-settings-service\\user-data-v2';
+        if (fs.existsSync(newSystemPath)) {
+            console.log(`[LocalSettingsService] 检测到新用户数据管理系统，跳过旧目录创建: ${userId}`);
+            return; // 不创建旧的用户目录
+        }
+
         const userPath = this.getUserSettingsPath(userId);
         this.ensureDirectory(userPath);
     }
@@ -78,35 +91,142 @@ class LocalSettingsService {
     }
 
     /**
-     * 获取当前选择的LLM提供商（应用本地设置）
+     * 获取当前选择的LLM提供商
+     * @param {string} userId 用户ID，如果不提供则使用本地设置
      */
-    getCurrentProvider() {
+    getCurrentProvider(userId = null) {
+        if (userId) {
+            // 尝试读取用户特定的设置
+            try {
+                const userSettingsPath = this.getUserSettingsPath(userId);
+                const localSettingsPath = path.join(userSettingsPath, 'local-settings.json');
+                if (fs.existsSync(localSettingsPath)) {
+                    const localSettings = this.readJsonFile(localSettingsPath, {});
+                    if (localSettings.current_provider) {
+                        return localSettings.current_provider;
+                    }
+                }
+            } catch (error) {
+                console.error('[LocalSettingsService] 读取用户提供商设置失败:', error);
+            }
+        }
+
+        // 回退到本地设置
         const localSettingsPath = path.join(this.localDataPath, 'local-settings.json');
         const localSettings = this.readJsonFile(localSettingsPath, { current_provider: 'builtin' });
         return localSettings.current_provider || 'builtin';
     }
 
     /**
-     * 设置当前选择的LLM提供商（应用本地设置）
+     * 设置当前选择的LLM提供商（用户特定设置）
+     * @param {string} provider 提供商名称
+     * @param {string} userId 用户ID，如果不提供则使用本地设置
      */
-    setCurrentProvider(provider) {
-        const localSettingsPath = path.join(this.localDataPath, 'local-settings.json');
-        const localSettings = this.readJsonFile(localSettingsPath, {});
-        localSettings.current_provider = provider;
-        localSettings.updated_at = new Date().toISOString();
-        return this.writeJsonFile(localSettingsPath, localSettings);
+    setCurrentProvider(provider, userId = null) {
+        if (userId) {
+            // 使用用户特定的设置
+            const userSettingsPath = this.getUserSettingsPath(userId);
+            const localSettingsPath = path.join(userSettingsPath, 'local-settings.json');
+            const localSettings = this.readJsonFile(localSettingsPath, {});
+            localSettings.current_provider = provider;
+            localSettings.updated_at = new Date().toISOString();
+            return this.writeJsonFile(localSettingsPath, localSettings);
+        } else {
+            // 回退到本地设置（兼容性）
+            const localSettingsPath = path.join(this.localDataPath, 'local-settings.json');
+            const localSettings = this.readJsonFile(localSettingsPath, {});
+            localSettings.current_provider = provider;
+            localSettings.updated_at = new Date().toISOString();
+            return this.writeJsonFile(localSettingsPath, localSettings);
+        }
     }
 
     /**
      * 获取智能日历格式的LLM设置
+     * @param {string} userId 用户ID，必须提供
      */
-    getCalendarLLMSettings(userId = this.defaultUserId) {
-        // 获取当前选择的提供商
-        const currentProvider = this.getCurrentProvider();
-        
+    getCalendarLLMSettings(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
+
+        console.log(`[LocalSettingsService] 获取用户LLM设置: ${userId}`);
+
+        // 首先尝试从新的用户数据系统读取设置
+        try {
+            const newSystemPath = 'C:\\code\\unified-settings-service\\user-data-v2';
+            if (fs.existsSync(newSystemPath)) {
+                console.log(`[LocalSettingsService] 检测到新用户数据系统，从中读取LLM设置`);
+                const userDataService = require('./userDataService');
+
+                // 通过用户ID获取用户信息
+                const users = userDataService.getAllUsersSync();
+                const user = users.find(u => u.user_id === userId);
+
+                if (user) {
+                    // 使用用户名作为文件名
+                    const fileName = user.username.length > 20 ? userId : user.username;
+                    const settingsPath = path.join(newSystemPath, `${fileName}_settings.json`);
+
+                    if (fs.existsSync(settingsPath)) {
+                        const userSettings = this.readJsonFile(settingsPath, {});
+                        const llmSettings = userSettings.llm || {};
+
+                        console.log(`[LocalSettingsService] 从新系统读取到的LLM设置:`, llmSettings);
+
+                        // 处理USE_DEFAULT_CONFIG标记
+                        const processedSettings = this.processLLMSettings(llmSettings);
+                        console.log(`[LocalSettingsService] 处理后的LLM设置:`, processedSettings);
+
+                        return processedSettings;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[LocalSettingsService] 从新系统读取LLM设置失败:', error);
+        }
+
+        // 回退到旧的逻辑
+        console.log(`[LocalSettingsService] 回退到旧的LLM设置读取逻辑`);
+
+        // 直接从统一设置服务获取用户的LLM设置
+        try {
+            const userSettingsPath = this.getUserSettingsPath(userId);
+            const llmSettingsFile = path.join(userSettingsPath, 'llm_settings.json');
+
+            if (fs.existsSync(llmSettingsFile)) {
+                const userLLMSettings = this.readJsonFile(llmSettingsFile, {});
+
+                // 如果用户有自定义设置，返回用户设置
+                if (Object.keys(userLLMSettings).length > 0) {
+                    // 转换为日历格式
+                    const providers = Object.keys(userLLMSettings);
+                    if (providers.length > 0) {
+                        const currentProvider = providers[0]; // 使用第一个提供商
+                        const providerSettings = userLLMSettings[currentProvider];
+
+                        return {
+                            provider: currentProvider,
+                            api_key: 'BUILTIN_PROXY', // 前端安全显示
+                            base_url: providerSettings.base_url || 'BUILTIN_PROXY',
+                            model_name: providerSettings.model_name || 'deepseek/deepseek-chat-v3-0324:free',
+                            temperature: providerSettings.temperature || 0.7,
+                            max_tokens: providerSettings.max_tokens || 2000,
+                            use_custom_model: false
+                        };
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[LocalSettingsService] 读取用户LLM设置失败:', error);
+        }
+
+        // 获取当前选择的提供商（用户特定，回退到本地设置）
+        const currentProvider = this.getCurrentProvider(userId);
+
         // 获取默认模型配置
         const defaultModels = this.getDefaultModels();
-        
+
         if ((currentProvider === 'builtin' || currentProvider === 'builtin-free') && defaultModels?.builtin_free) {
             // 内置模型使用安全配置
             return {
@@ -122,11 +242,11 @@ class LocalSettingsService {
             // 其他提供商从共享配置读取
             const sharedSettings = this.getSharedLLMSettings(userId);
             const providerConfig = sharedSettings.providers[currentProvider];
-            
+
             if (providerConfig) {
                 const useCustom = providerConfig.use_custom_model || false;
                 let modelToDisplay = '';
-                
+
                 if (useCustom) {
                     // 使用自定义模型时，优先使用custom_model，回退到model_name
                     modelToDisplay = providerConfig.custom_model || providerConfig.model_name || '';
@@ -134,7 +254,7 @@ class LocalSettingsService {
                     // 使用预定义模型时，优先使用predefined_model，回退到model_name
                     modelToDisplay = providerConfig.predefined_model || providerConfig.model_name || '';
                 }
-                
+
                 return {
                     provider: currentProvider,
                     api_key: providerConfig.api_key || '',
@@ -160,16 +280,71 @@ class LocalSettingsService {
     }
 
     /**
-     * 保存智能日历格式的LLM设置
+     * 处理LLM设置中的USE_DEFAULT_CONFIG标记
+     * @param {object} llmSettings 原始LLM设置
      */
-    async saveCalendarLLMSettings(calendarSettings, userId = this.defaultUserId) {
+    processLLMSettings(llmSettings) {
+        console.log(`[LocalSettingsService] 开始处理LLM设置:`, llmSettings);
+
+        // 如果provider是builtin且其他字段是USE_DEFAULT_CONFIG，则从默认配置读取
+        if (llmSettings.provider === 'builtin' &&
+            (llmSettings.model === 'USE_DEFAULT_CONFIG' ||
+             llmSettings.api_key === 'USE_DEFAULT_CONFIG' ||
+             llmSettings.base_url === 'USE_DEFAULT_CONFIG')) {
+
+            console.log(`[LocalSettingsService] 检测到USE_DEFAULT_CONFIG标记，从默认配置读取`);
+
+            // 获取默认模型配置
+            const defaultModels = this.getDefaultModels();
+            console.log(`[LocalSettingsService] 默认模型配置:`, defaultModels);
+
+            if (defaultModels?.builtin_free) {
+                const processedSettings = {
+                    provider: 'builtin-free',
+                    api_key: 'BUILTIN_PROXY', // 前端显示用占位符
+                    base_url: 'BUILTIN_PROXY', // 前端显示用占位符
+                    model_name: defaultModels.builtin_free.model_name || 'deepseek/deepseek-chat-v3-0324:free',
+                    temperature: defaultModels.builtin_free.temperature || 0.7,
+                    max_tokens: defaultModels.builtin_free.max_tokens || 2000,
+                    use_custom_model: false
+                };
+
+                console.log(`[LocalSettingsService] 处理后的内置模型设置:`, processedSettings);
+                return processedSettings;
+            }
+        }
+
+        // 如果不是USE_DEFAULT_CONFIG或者没有默认配置，直接返回原设置
+        const directSettings = {
+            provider: llmSettings.provider || 'builtin-free',
+            api_key: llmSettings.api_key || 'BUILTIN_PROXY',
+            base_url: llmSettings.base_url || 'BUILTIN_PROXY',
+            model_name: llmSettings.model || 'deepseek/deepseek-chat-v3-0324:free',
+            temperature: llmSettings.temperature || 0.7,
+            max_tokens: llmSettings.max_tokens || 2000,
+            use_custom_model: false
+        };
+
+        console.log(`[LocalSettingsService] 直接返回的设置:`, directSettings);
+        return directSettings;
+    }
+
+    /**
+     * 保存智能日历格式的LLM设置
+     * @param {object} calendarSettings LLM设置对象
+     * @param {string} userId 用户ID，必须提供
+     */
+    async saveCalendarLLMSettings(calendarSettings, userId) {
         try {
-            console.log('[LocalSettingsService] 开始保存LLM设置:', calendarSettings);
+            if (!userId) {
+                throw new Error('必须提供用户ID');
+            }
+            console.log('[LocalSettingsService] 开始保存LLM设置，用户ID:', userId, '设置:', calendarSettings);
             
             const provider = calendarSettings.provider;
             
-            // 设置当前提供商
-            const setProviderResult = this.setCurrentProvider(provider);
+            // 设置当前提供商（用户特定）
+            const setProviderResult = this.setCurrentProvider(provider, userId);
             if (!setProviderResult) {
                 console.error('[LocalSettingsService] 设置当前提供商失败');
                 throw new Error('设置当前提供商失败');
@@ -208,9 +383,86 @@ class LocalSettingsService {
     }
 
     /**
+     * 获取默认LLM设置（用于系统默认用户）
+     */
+    getDefaultLLMSettings() {
+        return {
+            providers: {
+                builtin: {
+                    api_key: 'builtin-free-key',
+                    model_name: 'builtin-free',
+                    base_url: '',
+                    description: '内置免费模型'
+                },
+                openai: {
+                    api_key: '',
+                    model_name: 'gpt-3.5-turbo',
+                    predefined_model: 'gpt-3.5-turbo',
+                    custom_model: '',
+                    base_url: 'https://api.openai.com/v1',
+                    use_custom_model: false
+                },
+                deepseek: {
+                    api_key: '',
+                    model_name: 'deepseek-chat',
+                    predefined_model: 'deepseek-chat',
+                    custom_model: '',
+                    base_url: 'https://api.deepseek.com/v1',
+                    use_custom_model: false
+                },
+                anthropic: {
+                    api_key: '',
+                    model_name: 'claude-instant-1',
+                    predefined_model: 'claude-instant-1',
+                    custom_model: '',
+                    base_url: 'https://api.anthropic.com',
+                    use_custom_model: false
+                },
+                google: {
+                    api_key: '',
+                    model_name: 'gemini-pro',
+                    predefined_model: 'gemini-pro',
+                    custom_model: '',
+                    base_url: 'https://generativelanguage.googleapis.com/v1beta',
+                    use_custom_model: false
+                },
+                openrouter: {
+                    api_key: '',
+                    model_name: 'deepseek/deepseek-chat-v3-0324:free',
+                    predefined_model: 'deepseek/deepseek-chat-v3-0324:free',
+                    custom_model: '',
+                    base_url: 'https://openrouter.ai/api/v1',
+                    use_custom_model: false
+                },
+                ollama: {
+                    api_key: '',
+                    model_name: 'llama2',
+                    predefined_model: 'llama2',
+                    custom_model: '',
+                    base_url: 'http://localhost:11434/v1',
+                    use_custom_model: false
+                },
+                custom: {
+                    api_key: '',
+                    model_name: '',
+                    predefined_model: '',
+                    custom_model: '',
+                    base_url: '',
+                    use_custom_model: true
+                }
+            }
+        };
+    }
+
+    /**
      * 获取共享LLM设置（不包含current_provider）
      */
-    getSharedLLMSettings(userId = this.defaultUserId) {
+    getSharedLLMSettings(userId = 'system-default') {
+        // 如果是系统默认用户，跳过用户目录检查，直接返回默认设置
+        if (userId === 'system-default') {
+            return this.getDefaultLLMSettings();
+        }
+
         this.ensureUserDirectory(userId);
         const llmPath = path.join(this.getUserSettingsPath(userId), 'llm.json');
         
@@ -231,8 +483,14 @@ class LocalSettingsService {
 
     /**
      * 保存LLM提供商设置到共享目录
+     * @param {string} provider 提供商名称
+     * @param {object} settings 设置对象
+     * @param {string} userId 用户ID，必须提供
      */
-    saveLLMProviderSettings(provider, settings, userId = this.defaultUserId) {
+    saveLLMProviderSettings(provider, settings, userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const llmPath = path.join(this.getUserSettingsPath(userId), 'llm.json');
         
@@ -286,10 +544,14 @@ class LocalSettingsService {
 
     /**
      * 获取全局LLM设置（兼容原接口）
+     * @param {string} userId 用户ID
      */
-    async getGlobalLLMSettings() {
+    async getGlobalLLMSettings(userId) {
         try {
-            return this.getCalendarLLMSettings();
+            if (!userId) {
+                throw new Error('必须提供用户ID');
+            }
+            return this.getCalendarLLMSettings(userId);
         } catch (error) {
             console.error('[本地设置服务] 获取全局LLM设置失败:', error);
             return null;
@@ -298,10 +560,15 @@ class LocalSettingsService {
 
     /**
      * 保存全局LLM设置（兼容原接口）
+     * @param {object} calendarSettings LLM设置对象
+     * @param {string} userId 用户ID
      */
-    async saveGlobalLLMSettings(calendarSettings) {
+    async saveGlobalLLMSettings(calendarSettings, userId) {
         try {
-            const result = this.saveCalendarLLMSettings(calendarSettings);
+            if (!userId) {
+                throw new Error('必须提供用户ID');
+            }
+            const result = this.saveCalendarLLMSettings(calendarSettings, userId);
             if (result) {
                 console.log('[本地设置服务] LLM设置保存成功');
                 return true;
@@ -319,8 +586,12 @@ class LocalSettingsService {
 
     /**
      * 获取Exchange设置
+     * @param {string} userId 用户ID，必须提供
      */
-    getExchangeSettings(userId = this.defaultUserId) {
+    getExchangeSettings(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const exchangePath = path.join(this.getUserSettingsPath(userId), 'exchange.json');
         
@@ -337,8 +608,13 @@ class LocalSettingsService {
 
     /**
      * 保存Exchange设置
+     * @param {object} settings 设置对象
+     * @param {string} userId 用户ID，必须提供
      */
-    saveExchangeSettings(settings, userId = this.defaultUserId) {
+    saveExchangeSettings(settings, userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const exchangePath = path.join(this.getUserSettingsPath(userId), 'exchange.json');
         
@@ -354,8 +630,12 @@ class LocalSettingsService {
 
     /**
      * 获取IMAP设置
+     * @param {string} userId 用户ID，必须提供
      */
-    getImapSettings(userId = this.defaultUserId) {
+    getImapSettings(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const imapPath = path.join(this.getUserSettingsPath(userId), 'imap.json');
         
@@ -387,8 +667,13 @@ class LocalSettingsService {
 
     /**
      * 保存IMAP设置
+     * @param {object} settings 设置对象
+     * @param {string} userId 用户ID，必须提供
      */
-    saveImapSettings(settings, userId = this.defaultUserId) {
+    saveImapSettings(settings, userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const imapPath = path.join(this.getUserSettingsPath(userId), 'imap.json');
         
@@ -404,8 +689,12 @@ class LocalSettingsService {
 
     /**
      * 获取CalDAV设置
+     * @param {string} userId 用户ID，必须提供
      */
-    getCalDAVSettings(userId = this.defaultUserId) {
+    getCalDAVSettings(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const caldavPath = path.join(this.getUserSettingsPath(userId), 'caldav.json');
         
@@ -421,8 +710,13 @@ class LocalSettingsService {
 
     /**
      * 保存CalDAV设置
+     * @param {object} settings 设置对象
+     * @param {string} userId 用户ID，必须提供
      */
-    saveCalDAVSettings(settings, userId = this.defaultUserId) {
+    saveCalDAVSettings(settings, userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const caldavPath = path.join(this.getUserSettingsPath(userId), 'caldav.json');
         
@@ -438,8 +732,12 @@ class LocalSettingsService {
 
     /**
      * 获取IMAP过滤设置
+     * @param {string} userId 用户ID，必须提供
      */
-    getImapFilterSettings(userId = this.defaultUserId) {
+    getImapFilterSettings(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const filterPath = path.join(this.getUserSettingsPath(userId), 'imap-filter.json');
         
@@ -453,8 +751,13 @@ class LocalSettingsService {
 
     /**
      * 保存IMAP过滤设置
+     * @param {object} settings 设置对象
+     * @param {string} userId 用户ID，必须提供
      */
-    saveImapFilterSettings(settings, userId = this.defaultUserId) {
+    saveImapFilterSettings(settings, userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
         this.ensureUserDirectory(userId);
         const filterPath = path.join(this.getUserSettingsPath(userId), 'imap-filter.json');
         
@@ -470,15 +773,19 @@ class LocalSettingsService {
 
     /**
      * 获取所有设置（兼容settingsManager.getAllSettings）
+     * @param {string} userId 用户ID
      */
-    async getAllSettings(userToken = null) {
+    async getAllSettings(userId) {
         try {
+            if (!userId) {
+                throw new Error('必须提供用户ID');
+            }
             return {
-                llm: this.getCalendarLLMSettings(),
-                exchange: this.getExchangeSettings(),
-                imap: this.getImapSettings(),
-                caldav: this.getCalDAVSettings(),
-                imapFilter: this.getImapFilterSettings()
+                llm: this.getCalendarLLMSettings(userId),
+                exchange: this.getExchangeSettings(userId),
+                imap: this.getImapSettings(userId),
+                caldav: this.getCalDAVSettings(userId),
+                imapFilter: this.getImapFilterSettings(userId)
             };
         } catch (error) {
             console.error('[本地设置服务] 获取所有设置失败:', error);
@@ -495,9 +802,13 @@ class LocalSettingsService {
 
     /**
      * LLM设置兼容方法
+     * @param {string} userId 用户ID
      */
-    async getLLMSettings(userToken = null) {
-        return this.getCalendarLLMSettings();
+    async getLLMSettings(userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
+        return this.getCalendarLLMSettings(userId);
     }
 
         /**
@@ -554,8 +865,11 @@ class LocalSettingsService {
         }
     }
 
-    async saveLLMSettings(settings, userToken = null) {
-        return this.saveCalendarLLMSettings(settings);
+    async saveLLMSettings(settings, userId) {
+        if (!userId) {
+            throw new Error('必须提供用户ID');
+        }
+        return this.saveCalendarLLMSettings(settings, userId);
     }
 }
 
