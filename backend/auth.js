@@ -11,6 +11,29 @@ const UNIFIED_SETTINGS_SERVICE_URL = process.env.UNIFIED_SETTINGS_SERVICE_URL ||
 // 导入新的用户数据服务
 const userDataService = require('./userDataService');
 
+// 检查统一设置服务中是否存在用户
+const checkUnifiedSettingsUser = async (email) => {
+    try {
+        const UNIFIED_SETTINGS_URL = process.env.UNIFIED_SETTINGS_URL || 'http://localhost:3002';
+        const response = await fetch(`${UNIFIED_SETTINGS_URL}/api/auth/find-by-email`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            return result.user || null;
+        }
+        return null;
+    } catch (error) {
+        console.error('[checkUnifiedSettingsUser] 检查统一设置服务用户失败:', error);
+        return null;
+    }
+};
+
 // 认证中间件 - 使用真实token验证
 const authenticateUser = async (req, res, next) => {
     try {
@@ -128,17 +151,36 @@ const getCurrentUserIdAsync = async (req) => {
     }
 
     try {
-        // 尝试从新的用户数据服务中查找用户
+        // 首先尝试从新的用户数据服务中查找用户
         let userData = await userDataService.getUserByEmail(user.email);
 
         if (!userData) {
-            // 如果用户不存在，从旧系统迁移
-            console.log(`[getCurrentUserIdAsync] 迁移用户从旧系统: ${user.email}`);
-            userData = await userDataService.migrateFromOldSystem(
-                req.userId, // 旧的用户ID
-                user.username || user.email.split('@')[0], // 用户名
-                user.email
-            );
+            // 如果本地不存在，先检查统一设置服务是否有此用户
+            console.log(`[getCurrentUserIdAsync] 本地未找到用户，检查统一设置服务: ${user.email}`);
+
+            try {
+                const unifiedUser = await checkUnifiedSettingsUser(user.email);
+                if (unifiedUser) {
+                    // 如果统一设置服务中存在用户，同步到本地
+                    console.log(`[getCurrentUserIdAsync] 从统一设置服务同步用户: ${unifiedUser.id}`);
+                    userData = await userDataService.createUserFromUnified(unifiedUser);
+                } else {
+                    // 如果统一设置服务中也不存在，从旧系统迁移
+                    console.log(`[getCurrentUserIdAsync] 迁移用户从旧系统: ${user.email}`);
+                    userData = await userDataService.migrateFromOldSystem(
+                        req.userId, // 旧的用户ID
+                        user.username || user.email.split('@')[0], // 用户名
+                        user.email
+                    );
+                }
+            } catch (unifiedError) {
+                console.warn(`[getCurrentUserIdAsync] 统一设置服务检查失败，回退到旧系统迁移:`, unifiedError);
+                userData = await userDataService.migrateFromOldSystem(
+                    req.userId,
+                    user.username || user.email.split('@')[0],
+                    user.email
+                );
+            }
         }
 
         // 更新最后登录时间

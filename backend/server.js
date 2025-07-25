@@ -1,4 +1,7 @@
-require('dotenv').config();
+// 加载项目根目录的.env文件
+require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });
+console.log(`[TideLog] 环境变量加载: STORAGE_TYPE=${process.env.STORAGE_TYPE}, NAS_PATH=${process.env.NAS_PATH}`);
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -4174,6 +4177,16 @@ app.post('/debug/reset-imap-lock', authenticateUser, async (req, res) => {
     }
 });
 
+// 环境变量检查端点
+app.get('/debug/env', (req, res) => {
+    res.json({
+        STORAGE_TYPE: process.env.STORAGE_TYPE,
+        NAS_PATH: process.env.NAS_PATH,
+        PROJECT_ROOT: process.env.PROJECT_ROOT,
+        NODE_ENV: process.env.NODE_ENV
+    });
+});
+
 // --- 启动服务器 ---
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Server] 智能日历服务器运行在端口 ${PORT} (所有网络接口)`);
@@ -4187,7 +4200,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Server]   POST /sync/caldav - CalDAV同步`);
     console.log(`[Server]   POST /debug/reset-llm-cache - 重置LLM缓存`);
     console.log(`[Server] 🚀 服务器启动完成!`);
-    
+
     // 初始化数据
     initializeData();
 });

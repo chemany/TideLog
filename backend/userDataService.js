@@ -10,8 +10,10 @@ const { createObjectCsvWriter } = require('csv-writer');
 
 class UserDataService {
     constructor() {
-        // 新的用户数据目录
-        this.userDataPath = 'C:\\code\\unified-settings-service\\user-data-v2';
+        // 新的用户数据目录 - 使用NAS存储
+        this.userDataPath = process.env.STORAGE_TYPE === 'nas'
+            ? path.join(process.env.NAS_PATH || '\\\\Z423-DXFP\\sata12-181XXXX7921', 'MindOcean', 'user-data', 'settings')
+            : 'C:\\code\\unified-settings-service\\user-data-v2';
         this.usersCSVPath = path.join(this.userDataPath, 'users.csv');
 
         // 用户创建锁，防止并发创建同一用户
@@ -426,6 +428,44 @@ class UserDataService {
     }
 
     /**
+     * 从统一设置服务创建用户
+     */
+    async createUserFromUnified(unifiedUser) {
+        // 检查用户是否已存在
+        const existingUser = await this.getUserByEmail(unifiedUser.email);
+        if (existingUser) {
+            console.log(`[UserDataService] 用户已存在，返回现有用户: ${existingUser.user_id}`);
+            return existingUser;
+        }
+
+        // 使用统一设置服务的用户ID和信息创建本地用户
+        const userData = {
+            user_id: unifiedUser.id, // 使用统一设置服务的用户ID
+            username: unifiedUser.username,
+            email: unifiedUser.email,
+            created_at: unifiedUser.created_at || new Date().toISOString(),
+            last_login: new Date().toISOString(),
+            status: 'active'
+        };
+
+        try {
+            // 写入CSV文件
+            const csvLine = `${userData.user_id},${userData.username},${userData.email},${userData.created_at},${userData.last_login},${userData.status}\n`;
+            const fs = require('fs');
+            fs.appendFileSync(this.usersCSVPath, csvLine, 'utf8');
+
+            // 创建用户设置文件（使用统一设置服务的用户ID）
+            await this.createUserSettingsFile(userData.user_id, userData.username, userData.email);
+
+            console.log(`[UserDataService] 从统一设置服务同步用户成功: ${userData.user_id}`);
+            return userData;
+        } catch (error) {
+            console.error(`[UserDataService] 从统一设置服务创建用户失败:`, error);
+            throw error;
+        }
+    }
+
+    /**
      * 从旧系统迁移用户数据
      */
     async migrateFromOldSystem(oldUserId, username, email) {
@@ -435,13 +475,13 @@ class UserDataService {
             console.log(`[UserDataService] 用户已存在，返回现有用户: ${existingUser.user_id}`);
             return existingUser;
         }
-        
+
         // 创建新用户
         const newUser = await this.createUser(username, email);
-        
+
         // 从旧系统复制设置数据
         await this.copySettingsFromOldSystem(oldUserId, newUser.user_id);
-        
+
         return newUser;
     }
 

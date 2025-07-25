@@ -2,9 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-// 文件路径定义
-const DATA_DIR = path.join(__dirname, 'data');
-const USERS_DATA_DIR = path.join(DATA_DIR, 'users'); // 用户数据目录
+// 文件路径定义 - 使用NAS存储
+const DATA_DIR = process.env.STORAGE_TYPE === 'nas'
+    ? path.join(process.env.NAS_PATH || '\\\\Z423-DXFP\\sata12-181XXXX7921', 'MindOcean', 'user-data', 'calendar')
+    : path.join(__dirname, 'data');
+const USERS_DATA_DIR = process.env.STORAGE_TYPE === 'nas'
+    ? DATA_DIR  // NAS模式下，DATA_DIR就是calendar目录
+    : path.join(DATA_DIR, 'users'); // 本地模式保持原结构
 
 // 全局设置文件（所有用户共享的设置，如服务配置等）
 const GLOBAL_SETTINGS_FILE = path.join(DATA_DIR, 'global_settings.json');
@@ -62,7 +66,10 @@ function ensureUserDataDir(userId) {
  */
 function getUsernameFromId(userId) {
     try {
-        const csvPath = 'C:\\code\\unified-settings-service\\user-data-v2\\users.csv';
+        // 使用环境变量确定CSV文件路径
+        const csvPath = process.env.STORAGE_TYPE === 'nas'
+            ? path.join(process.env.NAS_PATH || '\\\\Z423-DXFP\\sata12-181XXXX7921', 'MindOcean', 'user-data', 'settings', 'users.csv')
+            : 'C:\\code\\unified-settings-service\\user-data-v2\\users.csv';
 
         if (!fs.existsSync(csvPath)) {
             console.log(`[Storage] CSV文件不存在，使用用户ID作为文件名: ${csvPath}`);

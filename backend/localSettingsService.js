@@ -5,16 +5,55 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 class LocalSettingsService {
     constructor() {
-        // 使用与灵枢笔记相同的共享设置目录
-        this.settingsBasePath = 'C:\\code\\unified-settings-service\\user-settings';
-        this.defaultModelsPath = 'C:\\code\\unified-settings-service\\config\\default-models.json';
+        // 跨平台路径配置
+        this.projectRoot = this.findProjectRoot();
+        this.settingsBasePath = path.join(this.projectRoot, 'unified-settings-service', 'user-settings');
+        this.defaultModelsPath = path.join(this.projectRoot, 'unified-settings-service', 'config', 'default-models.json');
         this.localDataPath = path.join(__dirname, 'data');
+
+        console.log(`[TideLog LocalSettings] 平台: ${os.platform()}`);
+        console.log(`[TideLog LocalSettings] 项目根目录: ${this.projectRoot}`);
+        console.log(`[TideLog LocalSettings] 设置基础路径: ${this.settingsBasePath}`);
 
         // 确保本地数据目录存在
         this.ensureDirectory(this.localDataPath);
+    }
+
+    /**
+     * 查找项目根目录
+     */
+    findProjectRoot() {
+        let currentDir = __dirname;
+        const maxDepth = 10;
+        let depth = 0;
+
+        while (depth < maxDepth) {
+            const indicators = ['unified-settings-service', 'NeuraLink-Notes', 'TideLog'];
+            const hasIndicator = indicators.some(indicator =>
+                fs.existsSync(path.join(currentDir, indicator))
+            );
+
+            if (hasIndicator) {
+                return currentDir;
+            }
+
+            const parentDir = path.dirname(currentDir);
+            if (parentDir === currentDir) break;
+            currentDir = parentDir;
+            depth++;
+        }
+
+        // 回退方案
+        const envRoot = process.env.PROJECT_ROOT;
+        if (envRoot && fs.existsSync(envRoot)) {
+            return envRoot;
+        }
+
+        return os.platform() === 'win32' ? 'C:\\code' : path.join(os.homedir(), 'code');
     }
 
     /**
@@ -47,7 +86,7 @@ class LocalSettingsService {
         }
 
         // 检查新用户数据管理系统是否存在
-        const newSystemPath = 'C:\\code\\unified-settings-service\\user-data-v2';
+        const newSystemPath = path.join(this.projectRoot, 'unified-settings-service', 'user-data-v2');
         if (fs.existsSync(newSystemPath)) {
             console.log(`[LocalSettingsService] 检测到新用户数据管理系统，跳过旧目录创建: ${userId}`);
             return; // 不创建旧的用户目录
@@ -154,9 +193,19 @@ class LocalSettingsService {
 
         // 首先尝试从新的用户数据系统读取设置
         try {
-            const newSystemPath = 'C:\\code\\unified-settings-service\\user-data-v2';
+            // 使用环境变量确定存储路径
+            const storageType = process.env.STORAGE_TYPE || 'local';
+            const nasPath = process.env.NAS_PATH || '\\\\Z423-DXFP\\sata12-181XXXX7921';
+
+            let newSystemPath;
+            if (storageType === 'nas') {
+                newSystemPath = path.join(nasPath, 'MindOcean', 'user-data', 'settings');
+            } else {
+                newSystemPath = path.join(this.projectRoot, 'unified-settings-service', 'user-data-v2');
+            }
+
             if (fs.existsSync(newSystemPath)) {
-                console.log(`[LocalSettingsService] 检测到新用户数据系统，从中读取LLM设置`);
+                console.log(`[LocalSettingsService] 检测到新用户数据系统，从中读取LLM设置: ${newSystemPath} (存储类型: ${storageType})`);
                 const userDataService = require('./userDataService');
 
                 // 通过用户ID获取用户信息
