@@ -156,9 +156,7 @@ interface User {
   displayName?: string;
 }
 
-// Add interface for Exchange settings (data received from GET /config/exchange)
-// Keep this type as it might be used by SettingsPanel or fetched data
-// export interface ExchangeSettingsData { ... } // Keep export if SettingsPanel imports it
+
 
 // 日历页面主组件
 export default function CalendarPage() {
@@ -179,9 +177,7 @@ export default function CalendarPage() {
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  // REMOVED unused llmSettings and exchangeSettings state
-  // const [llmSettings, setLlmSettings] = useState<LLMSettingsData>({ provider: 'none' });
-  // const [exchangeSettings, setExchangeSettings] = useState<ExchangeSettingsData>({});
+
 
   // --- Add State for Controlled View --- 
   const [currentView, setCurrentView] = useState<View>(Views.MONTH);
@@ -271,8 +267,7 @@ export default function CalendarPage() {
       // 如果用户未登录，也要结束加载状态
         setIsLoadingData(false);
       }
-    // REMOVED fetching settings logic
-    // ... fetch events logic moved to fetchEvents ...
+
   }, [isLoggedIn]); // 只依赖于登录状态
 
   // --- 新增：计算下一个即将发生的事件（优化版本） ---

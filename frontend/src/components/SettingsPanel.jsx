@@ -20,16 +20,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
   const [llmMessage, setLlmMessage] = useState('');
   const [llmError, setLlmError] = useState('');
 
-  // Exchange Settings State
-  const [exchangeSettings, setExchangeSettings] = useState({ 
-    email: '', 
-    password: '', 
-    ewsUrl: '', 
-    exchangeVersion: 'Exchange2013' 
-  });
-  const [exchangeMessage, setExchangeMessage] = useState('');
-  const [exchangeError, setExchangeError] = useState('');
-  const [isSyncingExchange, setIsSyncingExchange] = useState(false);
+
 
   // IMAP Settings State
   const [imapSettings, setImapSettings] = useState({ 
@@ -71,7 +62,6 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
     // 并行加载所有设置，跳过重复的认证检查
     await Promise.all([
       loadLLMSettingsSkipAuth(),
-      loadExchangeSettingsSkipAuth(),
       loadImapSettingsSkipAuth(),
       loadCalDAVSettingsSkipAuth(),
       loadImapFilterSettings()
@@ -212,75 +202,9 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 3000);
     }
-  };  // --- Exchange Settings Handlers ---
-  const loadExchangeSettingsSkipAuth = useCallback(async () => {
-    try {
-      const localSettings = await hybridSettingsService.getExchangeSettings(true);
-      if (localSettings) {
-        setExchangeSettings(prev => ({
-          ...prev,
-          email: localSettings.email || '',
-          password: localSettings.password || '', // 直接使用后端返回的密码字段（可能是占位符）
-          ewsUrl: localSettings.ewsUrl || '',
-          exchangeVersion: localSettings.exchangeVersion || 'Exchange2013'
-        }));
-      }
-    } catch (error) {
-      console.error('[智能日历] 加载Exchange设置失败:', error);
-      setExchangeError('无法连接到本地设置服务。');
-    }
-  }, []);
-
-  const handleSaveExchangeSettings = async () => {
-    setExchangeMessage('');
-    setExchangeError('');
-    
-    try {
-      const success = await hybridSettingsService.saveExchangeSettings(exchangeSettings);
-      if (success) {
-        setExchangeMessage('Exchange设置已保存到本地设置服务。');
-      } else {
-        setExchangeError('保存Exchange设置失败。');
-      }
-    } catch (error) {
-      setExchangeError('保存Exchange设置时出错: ' + error.message);
-    }
   };
 
-  const handleSyncExchange = async () => {
-    setExchangeMessage('');
-    setExchangeError('');
-    setIsSyncingExchange(true);
-    let syncUrl = '';
-    let accountType = '';
-
-    // Determine the correct sync URL based on email type
-    if (exchangeSettings.email.toLowerCase().endsWith('@qq.com')) {
-      syncUrl = `${getApiBaseUrl()}/sync/qq-eas`; // Prefer QQ EAS Node.js version
-      accountType = 'QQ EAS';
-    } else {
-      syncUrl = `${getApiBaseUrl()}/sync/outlook-ews`; // Standard EWS Node.js version
-      accountType = 'Outlook/Exchange EWS';
-    }
-
-    try {
-      const response = await authenticatedFetch(syncUrl, { method: 'POST' });
-      const data = await response.json();
-
-      if (response.ok) {
-        setExchangeMessage(`同步成功 (${accountType}): ${data.message || '已同步'}`);
-        if (refreshEvents) {
-          refreshEvents(); // Refresh calendar events on successful sync
-        }
-      } else {
-        setExchangeError(`同步失败 (${accountType}): ${data.error || response.statusText}`);
-      }
-    } catch (error) {
-      setExchangeError(`同步时出错 (${accountType}): ${error.message}`);
-    } finally {
-      setIsSyncingExchange(false);
-    }
-  };  // --- IMAP Settings Handlers ---
+  // --- IMAP Settings Handlers ---
   const loadImapSettingsSkipAuth = useCallback(async () => {
     try {
       const localSettings = await hybridSettingsService.getIMAPSettings(true);
@@ -464,7 +388,6 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
           <div className="flex">
             {[
               { id: 'llm', label: 'LLM设置' },
-              { id: 'exchange', label: 'Exchange' },
               { id: 'imap', label: 'IMAP' },
               { id: 'caldav', label: 'CalDAV' }
             ].map((tab) => (
@@ -703,78 +626,6 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
               {llmError && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-md">
                   <span className="text-sm text-red-800">{llmError}</span>
-                </div>
-              )}
-            </div>
-          )}          {/* Exchange Settings */}
-          {activeTab === 'exchange' && (
-            <div className="space-y-6">
-              <h3 className="text-lg font-medium text-gray-900">Exchange / Outlook 设置</h3>
-              
-              <div className="form-group">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  邮箱地址
-                </label>
-                <input
-                  type="email"
-                  value={exchangeSettings.email}
-                  onChange={(e) => setExchangeSettings(prev => ({ ...prev, email: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="请输入邮箱地址"
-                />
-              </div>
-              
-              <div className="form-group">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  密码或授权码
-                </label>
-                <input
-                  type="password"
-                  value={exchangeSettings.password}
-                  onChange={(e) => setExchangeSettings(prev => ({ ...prev, password: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="请输入密码或授权码"
-                />
-              </div>
-              
-              <div className="form-group">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  EWS URL (可选)
-                </label>
-                <input
-                  type="url"
-                  value={exchangeSettings.ewsUrl}
-                  onChange={(e) => setExchangeSettings(prev => ({ ...prev, ewsUrl: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="例如 https://outlook.office365.com/EWS/Exchange.asmx"
-                />
-              </div>
-              
-              <div className="flex gap-4">
-                <button
-                  onClick={handleSaveExchangeSettings}
-                  className="flex-1 py-2 px-4 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors"
-                >
-                  保存Exchange设置
-                </button>
-                <button
-                  onClick={handleSyncExchange}
-                  disabled={isSyncingExchange || !exchangeSettings.email || !exchangeSettings.password}
-                  className="flex-1 py-2 px-4 rounded-md text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400 shadow-sm transition-colors"
-                >
-                  {isSyncingExchange ? '同步中...' : '立即同步'}
-                </button>
-              </div>
-
-              {/* Messages */}
-              {exchangeMessage && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-                  <span className="text-sm text-green-800">{exchangeMessage}</span>
-                </div>
-              )}
-              {exchangeError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-                  <span className="text-sm text-red-800">{exchangeError}</span>
                 </div>
               )}
             </div>

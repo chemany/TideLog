@@ -296,46 +296,7 @@ class UnifiedSettingsService {
         }
     }
 
-    // Exchange设置管理 (智能日历专属)
-    async getExchangeSettings(skipAuthCheck = false) {
-        try {
-            if (!skipAuthCheck && !await this.ensureAuthenticated()) {
-                throw new Error('认证失败');
-            }
 
-            const response = await fetch(`${API_BASE}/file-settings/exchange`, {
-                headers: this.getAuthHeaders()
-            });
-            
-            const result = await this.handleResponse(response);
-            console.log('[统一设置服务] 获取Exchange设置成功');
-            return result; // 文件设置API直接返回数据，不需要config_data字段
-        } catch (error) {
-            console.error('[统一设置服务] 获取Exchange设置失败:', error);
-            throw error;
-        }
-    }
-
-    async saveExchangeSettings(exchangeSettings) {
-        try {
-            if (!await this.ensureAuthenticated()) {
-                throw new Error('认证失败');
-            }
-
-            const response = await fetch(`${API_BASE}/file-settings/exchange`, {
-                method: 'POST',
-                headers: this.getAuthHeaders(),
-                body: JSON.stringify(exchangeSettings)
-            });
-            
-            await this.handleResponse(response);
-            console.log('[统一设置服务] 保存Exchange设置成功');
-            return true;
-        } catch (error) {
-            console.error('[统一设置服务] 保存Exchange设置失败:', error);
-            return false;
-        }
-    }
 
     // CalDAV设置管理 (智能日历专属)
     async getCalDAVSettings(skipAuthCheck = false) {

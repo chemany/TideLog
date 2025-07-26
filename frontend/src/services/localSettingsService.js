@@ -214,52 +214,7 @@ class LocalSettingsService {
         };
     }
 
-    // Exchange设置
-    async getExchangeSettings(skipAuthCheck = false) {
-        try {
-            // 刷新token
-            this.loadToken();
-            console.log('[本地设置服务] 获取Exchange设置');
 
-            const response = await fetch(`${API_BASE}/settings/exchange`, {
-                method: 'GET',
-                headers: this.getHeaders()
-            });
-
-            const settings = await this.handleResponse(response);
-            console.log('[本地设置服务] Exchange设置获取成功');
-            return settings;
-        } catch (error) {
-            console.error('[本地设置服务] 获取Exchange设置失败:', error);
-            return {
-                email: '',
-                password: '',
-                ewsUrl: '',
-                exchangeVersion: 'Exchange2013'
-            };
-        }
-    }
-
-    async saveExchangeSettings(settings) {
-        try {
-            // 刷新token
-            this.loadToken();
-            console.log('[本地设置服务] 保存Exchange设置');
-
-            const response = await fetch(`${API_BASE}/settings/exchange`, {
-                method: 'POST',
-                headers: this.getHeaders(),
-                body: JSON.stringify(settings)
-            });
-
-            await this.handleResponse(response);
-            console.log('[本地设置服务] Exchange设置保存成功');
-            return true;
-        } catch (error) {
-            console.error('[本地设置服务] 保存Exchange设置失败:', error);
-            return false;
-        }
-    }
 
     // CalDAV设置
     async getCalDAVSettings(skipAuthCheck = false) {

@@ -73,29 +73,7 @@ class HybridSettingsService {
         return await this.settingsService.saveLLMSettings(settings); // 使用本地设置服务
     }
 
-    async getExchangeSettings(skipAuthCheck = false) {
-        console.log('[混合设置服务] 使用本地设置服务获取Exchange设置');
-        
-        if (!skipAuthCheck) {
-            const isAuthenticated = await this.ensureAuthenticated();
-            if (!isAuthenticated) {
-                throw new Error('用户未认证');
-            }
-        }
-        
-        return await this.settingsService.getExchangeSettings(true);
-    }
 
-    async saveExchangeSettings(settings) {
-        console.log('[混合设置服务] 使用本地设置服务保存Exchange设置');
-        
-        const isAuthenticated = await this.ensureAuthenticated();
-        if (!isAuthenticated) {
-            throw new Error('用户未认证');
-        }
-        
-        return await this.settingsService.saveExchangeSettings(settings);
-    }
 
     async getCalDAVSettings(skipAuthCheck = false) {
         console.log('[混合设置服务] 使用本地设置服务获取CalDAV设置');
