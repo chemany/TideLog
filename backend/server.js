@@ -174,11 +174,13 @@ app.use(cors({
     origin: function (origin, callback) {
         // 允许的固定域名
         const allowedOrigins = [
-            'http://localhost:11000', 
-            'http://127.0.0.1:11000', 
+            'http://localhost:11000',
+            'http://127.0.0.1:11000',
             'http://jason.cheman.top:11000',
             'http://jason.cheman.top:8081',  // 添加外网nginx代理端口
-            'http://localhost:3000', 
+            'https://www.cheman.top',        // 添加HTTPS外网域名
+            'https://jason.cheman.top',      // 添加HTTPS外网域名
+            'http://localhost:3000',
             'http://127.0.0.1:3000'
         ];
         

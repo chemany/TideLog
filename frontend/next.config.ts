@@ -19,15 +19,17 @@ const nextConfig: NextConfig = {
     appIsrStatus: false, // 禁用ISR指示器
   },
 
+  // 生产环境启用检查
+  typescript: {
+    ignoreBuildErrors: false,
+  },
+  eslint: {
+    ignoreDuringBuilds: false,
+  },
+
   // 在开发模式下优化配置
   ...(process.env.NODE_ENV === 'development' && {
     // 禁用一些开发模式的功能来减少错误
-    typescript: {
-      ignoreBuildErrors: false,
-    },
-    eslint: {
-      ignoreDuringBuilds: false,
-    },
   }),
 
   // 在开发模式下禁用source map以减少404错误
