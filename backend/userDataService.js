@@ -259,7 +259,7 @@ class UserDataService {
     }
 
     /**
-     * 获取用户设置
+     * 获取用户设置（通过用户ID）
      */
     async getUserSettings(userId) {
         // 先通过用户ID找到用户名
@@ -269,12 +269,17 @@ class UserDataService {
             throw new Error(`用户不存在: ${userId}`);
         }
 
-        // 使用用户名作为文件名，如果用户名太长则使用用户ID
-        const fileName = user.username.length > 20 ? userId : user.username;
-        const settingsPath = path.join(this.userDataPath, `${fileName}_settings.json`);
+        return this.getUserSettingsByUsername(user.username);
+    }
+
+    /**
+     * 获取用户设置（通过用户名）- 推荐使用
+     */
+    async getUserSettingsByUsername(username) {
+        const settingsPath = path.join(this.userDataPath, `${username}_settings.json`);
         
         if (!fs.existsSync(settingsPath)) {
-            throw new Error(`用户设置文件不存在: ${userId}`);
+            throw new Error(`用户设置文件不存在: ${username}`);
         }
         
         const content = fs.readFileSync(settingsPath, 'utf-8');
@@ -282,7 +287,7 @@ class UserDataService {
     }
 
     /**
-     * 保存用户设置
+     * 保存用户设置（通过用户ID）
      */
     async saveUserSettings(userId, settings) {
         // 先通过用户ID找到用户名
@@ -292,9 +297,14 @@ class UserDataService {
             throw new Error(`用户不存在: ${userId}`);
         }
 
-        // 使用用户名作为文件名，如果用户名太长则使用用户ID
-        const fileName = user.username.length > 20 ? userId : user.username;
-        const settingsPath = path.join(this.userDataPath, `${fileName}_settings.json`);
+        return this.saveUserSettingsByUsername(user.username, settings);
+    }
+
+    /**
+     * 保存用户设置（通过用户名）- 推荐使用
+     */
+    async saveUserSettingsByUsername(username, settings) {
+        const settingsPath = path.join(this.userDataPath, `${username}_settings.json`);
         
         // 更新时间戳
         const updatedSettings = {
@@ -303,23 +313,32 @@ class UserDataService {
         };
         
         fs.writeFileSync(settingsPath, JSON.stringify(updatedSettings, null, 2), 'utf-8');
-        console.log(`[UserDataService] 用户设置已保存: ${userId}`);
+        console.log(`[UserDataService] 用户设置已保存: ${username}`);
     }
 
     /**
-     * 获取特定类型的设置（不自动创建用户）
+     * 获取特定类型的设置（不自动创建用户）- 支持用户ID和用户名
      */
-    async getUserSettingsByType(userId, settingType, userInfo = null) {
-        console.log(`[UserDataService] 获取设置类型: ${settingType}, 用户ID: ${userId}`);
+    async getUserSettingsByType(userIdOrUsername, settingType, userInfo = null) {
+        console.log(`[UserDataService] 获取设置类型: ${settingType}, 用户标识: ${userIdOrUsername}`);
         try {
-            const settings = await this.getUserSettings(userId);
+            let settings;
+            // 判断是用户ID还是用户名
+            if (userIdOrUsername.includes('_') || userIdOrUsername.length < 10) {
+                // 可能是用户名
+                settings = await this.getUserSettingsByUsername(userIdOrUsername);
+            } else {
+                // 可能是用户ID
+                settings = await this.getUserSettings(userIdOrUsername);
+            }
+            
             console.log(`[UserDataService] 用户完整设置:`, settings);
             const result = settings[settingType] || {};
             console.log(`[UserDataService] 返回${settingType}设置:`, result);
             return result;
         } catch (error) {
-            if (error.message.includes('用户不存在')) {
-                console.log(`[UserDataService] 用户不存在，返回默认设置: ${userId}`);
+            if (error.message.includes('用户不存在') || error.message.includes('用户设置文件不存在')) {
+                console.log(`[UserDataService] 用户不存在，返回默认设置: ${userIdOrUsername}`);
                 // 返回默认设置，不自动创建用户
                 const defaultSettings = this.getDefaultSettingsByType(settingType);
                 console.log(`[UserDataService] 返回${settingType}默认设置:`, defaultSettings);
@@ -370,29 +389,42 @@ class UserDataService {
     }
 
     /**
-     * 保存特定类型的设置（如果用户不存在则自动创建）
+     * 保存特定类型的设置（如果用户不存在则自动创建）- 支持用户ID和用户名
      */
-    async saveUserSettingsByType(userId, settingType, settingData, userInfo = null) {
+    async saveUserSettingsByType(userIdOrUsername, settingType, settingData, userInfo = null) {
         try {
-            const settings = await this.getUserSettings(userId);
-            settings[settingType] = {
-                ...settingData,
-                updated_at: new Date().toISOString()
-            };
-            await this.saveUserSettings(userId, settings);
-        } catch (error) {
-            if (error.message.includes('用户不存在')) {
-                console.log(`[UserDataService] 保存设置时用户不存在，自动创建用户: ${userId}`);
-                console.log(`[UserDataService] 用户信息:`, userInfo);
-                // 自动创建用户
-                await this.autoCreateUserIfNeeded(userId, userInfo);
-                // 重新尝试保存设置
-                const settings = await this.getUserSettings(userId);
+            let settings;
+            // 判断是用户ID还是用户名
+            if (userIdOrUsername.includes('_') || userIdOrUsername.length < 10) {
+                // 可能是用户名
+                settings = await this.getUserSettingsByUsername(userIdOrUsername);
                 settings[settingType] = {
                     ...settingData,
                     updated_at: new Date().toISOString()
                 };
-                await this.saveUserSettings(userId, settings);
+                await this.saveUserSettingsByUsername(userIdOrUsername, settings);
+            } else {
+                // 可能是用户ID
+                settings = await this.getUserSettings(userIdOrUsername);
+                settings[settingType] = {
+                    ...settingData,
+                    updated_at: new Date().toISOString()
+                };
+                await this.saveUserSettings(userIdOrUsername, settings);
+            }
+        } catch (error) {
+            if (error.message.includes('用户不存在') || error.message.includes('用户设置文件不存在')) {
+                console.log(`[UserDataService] 保存设置时用户不存在，自动创建用户: ${userIdOrUsername}`);
+                console.log(`[UserDataService] 用户信息:`, userInfo);
+                // 自动创建用户
+                await this.autoCreateUserIfNeeded(userIdOrUsername, userInfo);
+                // 重新尝试保存设置
+                const settings = await this.getUserSettings(userIdOrUsername);
+                settings[settingType] = {
+                    ...settingData,
+                    updated_at: new Date().toISOString()
+                };
+                await this.saveUserSettings(userIdOrUsername, settings);
             } else {
                 throw error;
             }

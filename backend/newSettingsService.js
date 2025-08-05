@@ -117,20 +117,6 @@ class NewSettingsService {
     }
 
     /**
-     * 保存IMAP设置
-     */
-    async saveImapSettings(settings, userId) {
-        try {
-            await userDataService.saveUserSettingsByType(userId, 'imap', settings);
-            console.log(`[NewSettingsService] 保存IMAP设置成功 - userId: ${userId}`);
-            return true;
-        } catch (error) {
-            console.error(`[NewSettingsService] 保存IMAP设置失败 - userId: ${userId}`, error);
-            return false;
-        }
-    }
-
-    /**
      * 获取Exchange设置
      */
     async getExchangeSettings(userId, userInfo = null) {

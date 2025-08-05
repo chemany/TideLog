@@ -41,20 +41,20 @@ function ensureDataDir() {
 }
 
 /**
- * 确保用户数据目录存在
+ * 确保用户数据目录存在 - 新版本中跳过用户ID目录创建
  * @param {string} userId - 用户ID
  */
 function ensureUserDataDir(userId) {
     try {
         ensureDataDir();
-        const userDir = path.join(USERS_DATA_DIR, userId);
-        if (!fs.existsSync(userDir)) {
-            fs.mkdirSync(userDir, { recursive: true });
-            console.log(`用户数据目录已创建: ${userDir}`);
-        }
-        return userDir;
+        
+        // 检测到新用户数据管理系统，跳过旧目录创建
+        console.log(`[LocalSettingsService] 检测到新用户数据管理系统，跳过旧目录创建: ${userId}`);
+        
+        // 返回用户数据根目录，不再创建用户ID子目录
+        return USERS_DATA_DIR;
     } catch (error) {
-        console.error(`创建用户 ${userId} 数据目录时出错:`, error);
+        console.error(`用户 ${userId} 数据目录处理时出错:`, error);
         throw error;
     }
 }
@@ -120,14 +120,24 @@ function getUserEventsFilePath(userId) {
 }
 
 /**
- * 获取用户特定文件路径
+ * 获取用户特定文件路径 - 基于用户名，不再创建用户ID目录
  * @param {string} userId - 用户ID
  * @param {string} filename - 文件名
  * @returns {string} 完整文件路径
  */
 function getUserFilePath(userId, filename) {
-    const userDir = ensureUserDataDir(userId);
-    return path.join(userDir, filename);
+    try {
+        ensureDataDir(); // 只确保数据目录存在
+        const username = getUsernameFromId(userId);
+        // 直接使用用户名命名文件，不创建用户ID目录
+        const baseFilename = filename.replace('.json', '');
+        return path.join(USERS_DATA_DIR, `${username}_${baseFilename}.json`);
+    } catch (error) {
+        console.error(`[Storage] 获取用户文件路径失败:`, error);
+        // 回退到旧的方式
+        const userDir = ensureUserDataDir(userId);
+        return path.join(userDir, filename);
+    }
 }
 
 /**
