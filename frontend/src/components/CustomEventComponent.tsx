@@ -1,4 +1,4 @@
-import React from 'react';
+// React import removed - using modern JSX transform
 import type { EventProps } from 'react-big-calendar'; // Import EventProps for typing
 import type { MyCalendarEvent } from '../app/page'; // Import your specific event type
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';

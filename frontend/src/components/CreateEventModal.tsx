@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { format, parse } from 'date-fns';
 // Re-exporting types for now, consider a dedicated types file later
 import type { SlotInfo, MyCalendarEvent } from '../app/page';

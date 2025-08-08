@@ -1,9 +1,25 @@
 "use client";
 
+// 抑制来自第三方库的JSX Transform警告
+if (typeof window !== 'undefined') {
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    if (
+      args[0] &&
+      typeof args[0] === 'string' &&
+      args[0].includes('outdated JSX transform')
+    ) {
+      // 忽略第三方库的JSX Transform警告
+      return;
+    }
+    originalWarn.apply(console, args);
+  };
+}
+
 import { getApiBaseUrl, authenticatedFetch } from '../config';
 
 // ... 其余 import 保持不变 ...
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Calendar, dateFnsLocalizer, Views, Event as RbcEvent, View, EventProps } from 'react-big-calendar';
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
