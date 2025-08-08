@@ -1,15 +1,25 @@
 "use client";
 
-// 抑制来自第三方库的JSX Transform警告
-if (typeof window !== 'undefined') {
+// 抑制开发环境中的警告和提示，提升启动速度
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  // 禁用React DevTools检查提示
+  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    ...window.__REACT_DEVTOOLS_GLOBAL_HOOK__,
+    supportsFiber: true,
+    inject: () => {},
+    onCommitFiberRoot: () => {},
+    onCommitFiberUnmount: () => {},
+  };
+  
+  // 抑制JSX Transform警告
   const originalWarn = console.warn;
   console.warn = (...args) => {
     if (
       args[0] &&
       typeof args[0] === 'string' &&
-      args[0].includes('outdated JSX transform')
+      (args[0].includes('outdated JSX transform') ||
+       args[0].includes('React DevTools'))
     ) {
-      // 忽略第三方库的JSX Transform警告
       return;
     }
     originalWarn.apply(console, args);
