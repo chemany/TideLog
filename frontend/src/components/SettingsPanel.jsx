@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from "react";
 import hybridSettingsService from '../services/hybridSettingsService';
 import { getApiBaseUrl, authenticatedFetch } from '../config';
 
@@ -19,8 +19,6 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
   const [activeLlmTab, setActiveLlmTab] = useState('none');
   const [llmMessage, setLlmMessage] = useState('');
   const [llmError, setLlmError] = useState('');
-
-
 
   // IMAP Settings State
   const [imapSettings, setImapSettings] = useState({ 

@@ -14,17 +14,15 @@ const nextConfig: NextConfig = {
     'wss://jason.cheman.top:8081'
   ],
 
-  // 开发模式配置
-  devIndicators: {
-    appIsrStatus: false, // 禁用ISR指示器
-  },
+  // 开发模式配置（移除deprecated选项）
 
-  // 生产环境启用检查
+  // 生产环境启用检查，但允许warnings通过
   typescript: {
     ignoreBuildErrors: false,
   },
   eslint: {
     ignoreDuringBuilds: false,
+    dirs: ['src'],
   },
 
   // 在开发模式下优化配置
@@ -37,10 +35,12 @@ const nextConfig: NextConfig = {
     productionBrowserSourceMaps: false,
   }),
 
-  // 启用现代JSX Transform以提高性能
+  // 编译器配置
   compiler: {
-    // 使用现代JSX运行时
+    // 生产环境优化
     reactRemoveProperties: process.env.NODE_ENV === 'production',
+    // 启用emotion支持（如果需要）
+    emotion: true,
   },
   
   /**

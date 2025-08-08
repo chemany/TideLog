@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from "react";
 import hybridSettingsService from '../services/hybridSettingsService';
 
 const LoginDialog = ({ open, onClose, onLoginSuccess }) => {
