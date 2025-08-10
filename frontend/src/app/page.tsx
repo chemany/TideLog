@@ -1,31 +1,5 @@
 "use client";
 
-// 抑制开发环境中的警告和提示，提升启动速度
-if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-  // 禁用React DevTools检查提示
-  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-    ...window.__REACT_DEVTOOLS_GLOBAL_HOOK__,
-    supportsFiber: true,
-    inject: () => {},
-    onCommitFiberRoot: () => {},
-    onCommitFiberUnmount: () => {},
-  };
-  
-  // 抑制JSX Transform警告
-  const originalWarn = console.warn;
-  console.warn = (...args) => {
-    if (
-      args[0] &&
-      typeof args[0] === 'string' &&
-      (args[0].includes('outdated JSX transform') ||
-       args[0].includes('React DevTools'))
-    ) {
-      return;
-    }
-    originalWarn.apply(console, args);
-  };
-}
-
 import { getApiBaseUrl, authenticatedFetch } from '../config';
 
 // ... 其余 import 保持不变 ...

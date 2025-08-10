@@ -1,0 +1,60 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 海洋蓝到深蓝的渐变背景 -->
+  <defs>
+    <linearGradient id="oceanGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4FC3F7"/>
+      <stop offset="100%" stop-color="#1565C0"/>
+    </linearGradient>
+    
+    <!-- 波浪阴影效果 -->
+    <filter id="waveShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- 圆角背景 -->
+  <rect width="512" height="512" rx="80" ry="80" fill="url(#oceanGradient)"/>
+  
+  <!-- 主要波浪 - 代表重要日程 -->
+  <path d="M 50 200 Q 128 150 206 200 T 362 200 T 462 200" 
+        stroke="#FFFFFF" stroke-width="12" fill="none" 
+        opacity="0.9" filter="url(#waveShadow)"/>
+  
+  <!-- 次要波浪 - 代表一般日程 -->
+  <path d="M 50 250 Q 128 210 206 250 T 362 250 T 462 250" 
+        stroke="#E1F5FE" stroke-width="10" fill="none" 
+        opacity="0.8"/>
+  
+  <!-- 第三层波浪 - 代表提醒事项 -->
+  <path d="M 50 300 Q 128 270 206 300 T 362 300 T 462 300" 
+        stroke="#B3E5FC" stroke-width="8" fill="none" 
+        opacity="0.7"/>
+  
+  <!-- 第四层波浪 - 代表次要提醒 -->
+  <path d="M 50 350 Q 128 330 206 350 T 362 350 T 462 350" 
+        stroke="#81D4FA" stroke-width="6" fill="none" 
+        opacity="0.6"/>
+  
+  <!-- 底部装饰波浪群 -->
+  <path d="M 0 400 Q 64 380 128 400 T 256 400 T 384 400 T 512 400 L 512 512 L 0 512 Z" 
+        fill="#FFFFFF" opacity="0.2"/>
+  
+  <path d="M 0 430 Q 64 410 128 430 T 256 430 T 384 430 T 512 430 L 512 512 L 0 512 Z" 
+        fill="#FFFFFF" opacity="0.15"/>
+  
+  <path d="M 0 460 Q 64 440 128 460 T 256 460 T 384 460 T 512 460 L 512 512 L 0 512 Z" 
+        fill="#FFFFFF" opacity="0.1"/>
+  
+  <!-- 中央标识性波浪图案 - 潮汐志标志 -->
+  <circle cx="256" cy="180" r="60" fill="none" stroke="#FFFFFF" stroke-width="3" opacity="0.4"/>
+  <circle cx="256" cy="180" r="40" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.6"/>
+  <circle cx="256" cy="180" r="20" fill="#FFFFFF" opacity="0.8"/>
+  
+  <!-- 围绕中心的小波浪点 - 代表日程节点 -->
+  <circle cx="206" cy="160" r="4" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="306" cy="160" r="4" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="226" cy="220" r="4" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="286" cy="220" r="4" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="176" cy="190" r="3" fill="#FFFFFF" opacity="0.7"/>
+  <circle cx="336" cy="190" r="3" fill="#FFFFFF" opacity="0.7"/>
+</svg>

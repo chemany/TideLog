@@ -14,15 +14,40 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "潮汐志",
-  description: "潮汐志智能日历管理系统",
+  title: "潮汐志 - 智能日历管理",
+  description: "智能日历事件管理应用，支持自然语言创建和文档导入",
   icons: {
-    icon: '/favicon.svg',
-    shortcut: '/favicon.svg',
-    apple: '/favicon.svg',
+    icon: [
+      {
+        url: '/calendars/favicon-16x16.png',
+        sizes: '16x16',
+        type: 'image/png',
+      },
+      {
+        url: '/calendars/favicon-32x32.png', 
+        sizes: '32x32',
+        type: 'image/png',
+      },
+      {
+        url: '/calendars/tidelog-icon.svg',
+        type: 'image/svg+xml',
+      }
+    ],
+    shortcut: '/calendars/favicon.ico',
+    apple: '/calendars/apple-touch-icon.png',
   },
-  manifest: '/manifest.json',
+  manifest: '/calendars/manifest.json',
 };
+
+export function generateViewport() {
+  return {
+    themeColor: '#4FC3F7',
+    colorScheme: 'light',
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 1,
+  }
+}
 
 export default function RootLayout({
   children,

@@ -52,12 +52,12 @@ const nextConfig: NextConfig = {
       };
       
       // 配置babel-loader忽略特定的第三方库警告
-      const rules = config.module.rules.find(rule => 
+      const rules = config.module.rules.find((rule: any) => 
         rule.oneOf
       )?.oneOf;
       
       if (rules) {
-        const babelRule = rules.find(rule => 
+        const babelRule = rules.find((rule: any) => 
           rule.use?.loader === 'next-swc-loader'
         );
         

@@ -1,16 +1,39 @@
 {
-  "name": "智能日历",
-  "short_name": "智能日历",
-  "description": "AI智能日历应用",
+  "name": "潮汐志 - 智能日历管理",
+  "short_name": "潮汐志",
+  "description": "智能日历事件管理应用，支持自然语言创建和文档导入",
   "start_url": "/calendars/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#1976d2",
+  "background_color": "#1565C0",
+  "theme_color": "#4FC3F7",
+  "orientation": "portrait",
   "icons": [
     {
-      "src": "/calendars/favicon.svg",
+      "src": "/calendars/favicon-16x16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "/calendars/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/calendars/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/calendars/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/calendars/tidelog-icon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
-  ]
+  ],
+  "categories": ["productivity", "calendar", "lifestyle"]
 } 
