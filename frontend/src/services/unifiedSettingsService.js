@@ -31,9 +31,15 @@ const getUnifiedSettingsApiBase = () => {
     console.log(`[统一设置服务] 检测到局域网环境(${hostname})，使用IP直连`);
     return `http://${hostname}:3002/api`;
   } else {
-    // 外网环境，使用nginx代理路径
-    console.log(`[统一设置服务] 检测到外网环境(${hostname}:${port})，使用nginx代理路径`);
-    return `${protocol}//${hostname}/unified-settings/api`;
+    // 外网环境，但如果是cheman.top域名，说明是通过隧道访问本机服务
+    if (hostname === 'www.cheman.top' || hostname === 'cheman.top') {
+      console.log(`[统一设置服务] 检测到cheman.top域名(${hostname})，使用直接API路径`);
+      return `${protocol}//${hostname}/api`;
+    } else {
+      // 其他外网环境，使用nginx代理路径
+      console.log(`[统一设置服务] 检测到外网环境(${hostname}:${port})，使用nginx代理路径`);
+      return `${protocol}//${hostname}/unified-settings/api`;
+    }
   }
 };
 

@@ -45,9 +45,17 @@ function parseDateString(dateStr) {
           // 改进的正则表达式
           const dateRegex = /(\d{4}[-/年]\s?\d{1,2}[-/月]\s?\d{1,2})日?/g; 
           const timeRegex = /(\d{1,2}\s?[:：]\s?\d{2})\s?([APap][Mm])?/g; 
+          
+          // 新增：相对时间正则表达式
+          const relativeDateRegex = /(今天|今日|明天|明日|后天|昨天|昨日)/g;
+          const relativeTimeRegex = /(上午|下午|早上|早晨|中午|晚上|傍晚|晚间)/g;
+          const weekdayRegex = /(周一|周二|周三|周四|周五|周六|周日|星期一|星期二|星期三|星期四|星期五|星期六|星期日)/g;
   
           const dateMatches = [...text.matchAll(dateRegex)];
           const timeMatches = [...text.matchAll(timeRegex)];
+          const relativeDateMatches = [...text.matchAll(relativeDateRegex)];
+          const relativeTimeMatches = [...text.matchAll(relativeTimeRegex)];
+          const weekdayMatches = [...text.matchAll(weekdayRegex)];
           
           let extractedTitlePart = text; // 用于尝试提取标题
   
@@ -108,6 +116,113 @@ function parseDateString(dateStr) {
                        isAllDay = true;
                    }
               }
+          }
+          
+          // 如果没有找到明确日期，尝试解析相对日期和时间
+          if (!startDate && (relativeDateMatches.length > 0 || relativeTimeMatches.length > 0 || weekdayMatches.length > 0)) {
+              console.log("[Regex Parse] 尝试解析相对时间...");
+              
+              let relativeDate = new Date(); // 默认今天
+              
+              // 解析相对日期
+              if (relativeDateMatches.length > 0) {
+                  const relativeDateStr = relativeDateMatches[0][1];
+                  switch (relativeDateStr) {
+                      case '今天':
+                      case '今日':
+                          // 默认已经是今天，不需要修改
+                          break;
+                      case '明天':
+                      case '明日':
+                          relativeDate.setDate(relativeDate.getDate() + 1);
+                          break;
+                      case '后天':
+                          relativeDate.setDate(relativeDate.getDate() + 2);
+                          break;
+                      case '昨天':
+                      case '昨日':
+                          relativeDate.setDate(relativeDate.getDate() - 1);
+                          break;
+                  }
+              }
+              
+              // 解析星期几（假设是下周的该天）
+              if (weekdayMatches.length > 0) {
+                  const weekdayStr = weekdayMatches[0][1];
+                  const weekdayMap = {
+                      '周一': 1, '星期一': 1,
+                      '周二': 2, '星期二': 2,
+                      '周三': 3, '星期三': 3,
+                      '周四': 4, '星期四': 4,
+                      '周五': 5, '星期五': 5,
+                      '周六': 6, '星期六': 6,
+                      '周日': 0, '星期日': 0
+                  };
+                  
+                  const targetWeekday = weekdayMap[weekdayStr];
+                  if (targetWeekday !== undefined) {
+                      const currentWeekday = relativeDate.getDay();
+                      let daysToAdd = targetWeekday - currentWeekday;
+                      
+                      // 如果目标是今天的星期几，则找下周的同一天
+                      if (daysToAdd <= 0) {
+                          daysToAdd += 7;
+                      }
+                      
+                      relativeDate.setDate(relativeDate.getDate() + daysToAdd);
+                  }
+              }
+              
+              // 解析相对时间
+              if (relativeTimeMatches.length > 0) {
+                  const relativeTimeStr = relativeTimeMatches[0][1];
+                  let hour = 14; // 默认下午2点
+                  
+                  switch (relativeTimeStr) {
+                      case '上午':
+                      case '早上':
+                      case '早晨':
+                          hour = 9; // 上午9点
+                          break;
+                      case '中午':
+                          hour = 12; // 中午12点
+                          break;
+                      case '下午':
+                          hour = 14; // 下午2点
+                          break;
+                      case '晚上':
+                      case '傍晚':
+                      case '晚间':
+                          hour = 19; // 晚上7点
+                          break;
+                  }
+                  
+                  relativeDate.setHours(hour, 0, 0, 0);
+              } else {
+                  // 如果只有日期没有时间，默认设为全天事件
+                  relativeDate.setHours(0, 0, 0, 0);
+                  isAllDay = true;
+              }
+              
+              startDate = relativeDate;
+              endDate = new Date(startDate);
+              
+              if (isAllDay) {
+                  endDate.setHours(23, 59, 59, 999);
+              } else {
+                  endDate = new Date(startDate.getTime() + 60 * 60 * 1000); // 默认1小时
+              }
+              
+              // 提取标题（去除时间相关词汇）
+              extractedTitlePart = text
+                  .replace(relativeDateRegex, '')
+                  .replace(relativeTimeRegex, '')
+                  .replace(weekdayRegex, '')
+                  .trim();
+              
+              title = (extractedTitlePart && extractedTitlePart.length > 2) ? extractedTitlePart : title;
+              
+              console.log(`[Regex Parse] 相对时间解析成功: ${startDate.toISOString()}`);
           }
       } catch (e) {
            console.error("[Regex Parse] Error during regex parsing:", e);

@@ -1092,15 +1092,23 @@ JSON 对象结果：
         let llmResponseContent = '';
         try {
             console.log("[LLM Parse Util] 发送请求到LLM...");
-            const completion = await openaiClient.chat.completions.create({
+            // 为了兼容不同的API提供商，移除可能不支持的response_format参数
+            const completionParams = {
                 model: modelToUse,
                 messages: [
-                    { role: "system", content: "你是一个精确的自然语言理解助手，负责将用户输入的描述转换为结构化的日历事件 JSON 对象。" },
+                    { role: "system", content: "你是一个精确的自然语言理解助手，负责将用户输入的描述转换为结构化的日历事件 JSON 对象。请务必只返回JSON格式的响应。" },
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.2,
-                response_format: { type: "json_object" }
-            });
+                max_tokens: currentLlmSettings.max_tokens || 2000
+            };
+            
+            // 只有OpenAI和兼容的API才支持response_format
+            if (currentLlmSettings.provider === 'openai' || currentLlmSettings.provider === 'builtin-free') {
+                completionParams.response_format = { type: "json_object" };
+            }
+            
+            const completion = await openaiClient.chat.completions.create(completionParams);
 
             llmResponseContent = completion?.choices?.[0]?.message?.content?.trim() ?? '';
             console.log("[LLM Parse Util] 收到LLM响应:", llmResponseContent);
@@ -4059,14 +4067,14 @@ app.post('/sync/imap', authenticateUser, async (req, res) => {
 
             // 转换新设置服务格式到IMAP同步期望的格式
             userImapSettings = {
-                email: settings.email,
-                imapHost: settings.imapHost,
+                email: settings.user,     // 原始格式用的是 user
+                imapHost: settings.host,  // 原始格式用的是 host
                 password: settings.password,
-                imapPort: settings.imapPort,
-                useTLS: settings.useTLS,
+                imapPort: settings.port,  // 原始格式用的是 port
+                useTLS: settings.tls,     // 原始格式用的是 tls
                 // 保持向后兼容的字段名
-                user: settings.email,
-                host: settings.imapHost
+                user: settings.user,
+                host: settings.host
             };
 
             console.log('[/sync/imap] 用户IMAP设置:', {

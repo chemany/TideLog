@@ -186,7 +186,7 @@ class NewSettingsService {
      */
     async getLLMSettings(userId) {
         try {
-            const settings = await userDataService.getUserSettingsByType(userId, 'llm');
+            const settings = await userDataService.getUserSettingsByType(userId, 'tidelog_llm');
             console.log(`[NewSettingsService] 获取LLM设置 - userId: ${userId}`, settings);
 
             // 处理USE_DEFAULT_CONFIG标记
@@ -281,7 +281,7 @@ class NewSettingsService {
      */
     async saveLLMSettings(settings, userId, userInfo = null) {
         try {
-            await userDataService.saveUserSettingsByType(userId, 'llm', settings, userInfo);
+            await userDataService.saveUserSettingsByType(userId, 'tidelog_llm', settings, userInfo);
             console.log(`[NewSettingsService] 保存LLM设置成功 - userId: ${userId}`);
             return true;
         } catch (error) {
