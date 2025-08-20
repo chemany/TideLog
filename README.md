@@ -1,6 +1,8 @@
-# 📅 潮汐志 (TideLog)
+# 潮汐志 (TideLog)
 
-多平台日历同步和AI助手系统，支持Exchange、CalDAV、IMAP等多种协议。集成统一设置服务，提供智能日程管理体验。
+智能日历系统 - 多平台日历同步和AI助手系统
+
+🔗 在线体验：[https://www.cheman.top/calendars/](https://www.cheman.top/calendars/)
 
 ## ✨ 功能特性
 
@@ -65,8 +67,8 @@
 
 1. **克隆项目**
    ```bash
-   git clone https://github.com/你的用户名/smart-calendar.git
-   cd smart-calendar
+   git clone https://github.com/chemany/tidelog.git
+   cd tidelog
    ```
 
 2. **安装依赖**
@@ -286,8 +288,8 @@ smart-calendar/
 
 ## 📞 联系方式
 
-- 项目地址: https://github.com/你的用户名/smart-calendar
-- 问题反馈: https://github.com/你的用户名/smart-calendar/issues
+- 项目地址: https://github.com/chemany/tidelog
+- 问题反馈: https://github.com/chemany/tidelog/issues
 
 ---
 
