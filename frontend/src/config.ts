@@ -26,11 +26,18 @@ export const getApiBaseUrl = () => {
     apiUrl = `http://${hostname}:11001`;
     console.log(`[API Config] 检测到局域网环境(${hostname})，使用IP连接:`, apiUrl);
   } else {
-    // 外网环境：通过nginx代理访问
-    const protocol = window.location.protocol;
-    const host = window.location.host;
-    apiUrl = `${protocol}//${host}/calendars/api`;
-    console.log(`[API Config] 检测到外网环境(${hostname})，使用nginx代理:`, apiUrl);
+    // 外网环境：如果是cheman.top域名，通过8081端口的API路由访问
+    if (hostname === 'www.cheman.top' || hostname === 'cheman.top') {
+      const protocol = window.location.protocol;
+      apiUrl = `${protocol}//${hostname}/calendars/api`;
+      console.log(`[API Config] 检测到cheman.top域名(${hostname})，通过隧道API路由访问:`, apiUrl);
+    } else {
+      // 其他外网环境：通过nginx代理访问
+      const protocol = window.location.protocol;
+      const host = window.location.host;
+      apiUrl = `${protocol}//${host}/calendars/api`;
+      console.log(`[API Config] 检测到外网环境(${hostname})，使用nginx代理:`, apiUrl);
+    }
   }
   
   return apiUrl;

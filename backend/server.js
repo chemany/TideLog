@@ -1,5 +1,5 @@
-// 加载项目根目录的.env文件
-require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });
+// 加载当前目录的.env文件
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 console.log(`[TideLog] 环境变量加载: STORAGE_TYPE=${process.env.STORAGE_TYPE}, NAS_PATH=${process.env.NAS_PATH}`);
 
 const express = require('express');
@@ -40,9 +40,7 @@ const {
 } = require('./storage');
 // 导入认证中间件
 const { authenticateUser, optionalAuth, getCurrentUserId, isAuthenticated } = require('./auth');
-// 导入本地设置服务（替代统一设置客户端和设置管理器）
-const localSettingsService = require('./localSettingsService');
-// 导入新的设置服务
+// 导入设置服务（已统一为newSettingsService）
 const newSettingsService = require('./newSettingsService');
 // --- 导入新的 EAS 同步函数 ---
 const { syncQQViaEAS } = require('./eas_sync'); 
@@ -125,7 +123,7 @@ async function initializeData() {
         console.log(`[初始化] 使用系统用户ID: ${systemUserId} 加载默认设置`);
 
         // 批量获取所有设置（从本地设置服务）
-        const allSettings = await localSettingsService.getAllSettings(systemUserId);
+        const allSettings = await newSettingsService.getAllSettings(systemUserId);
 
         llmSettings = allSettings.llm;
         exchangeSettings = allSettings.exchange;
@@ -255,12 +253,12 @@ app.post('/config/llm', authenticateUser, async (req, res) => {
         // 如果前端没有发送API Key（部分更新），则先获取现有设置
         let settingsToSave = { ...newSettings };
         if (!newSettings.api_key) {
-            const existingSettings = await localSettingsService.getLLMSettings(userId);
+            const existingSettings = await newSettingsService.getLLMSettings(userId);
             settingsToSave.api_key = existingSettings.api_key || '';
         }
 
         // 使用本地设置服务保存LLM设置
-        const success = await localSettingsService.saveLLMSettings(settingsToSave, userId);
+        const success = await newSettingsService.saveLLMSettings(settingsToSave, userId);
         
         if (success) {
             // 更新内存缓存
@@ -268,7 +266,7 @@ app.post('/config/llm', authenticateUser, async (req, res) => {
             
             res.status(200).json({ 
                 message: 'LLM设置已保存。',
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -284,7 +282,7 @@ app.get('/config/llm', authenticateUser, async (req, res) => {
 
     try {
         // 使用本地设置服务获取LLM设置
-        const settings = await localSettingsService.getLLMSettings(userId);
+        const settings = await newSettingsService.getLLMSettings(userId);
         
         // 更新内存缓存
         llmSettings = { ...settings };
@@ -307,7 +305,7 @@ app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
         const userId = req.user?.userId || 'system-default';
 
         // 获取共享LLM设置
-        const sharedSettings = localSettingsService.getSharedLLMSettings(userId);
+        const sharedSettings = newSettingsService.getSharedLLMSettings(userId);
         const providerConfig = sharedSettings.providers[provider];
         
         if (providerConfig) {
@@ -372,7 +370,7 @@ app.post('/config/exchange', authenticateUser, async (req, res) => {
 
     try {
         // 使用本地设置服务保存Exchange设置
-        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userId);
+        const success = await newSettingsService.saveExchangeSettings(validatedSettings, userId);
         
         if (success) {
             // 更新内存缓存
@@ -381,7 +379,7 @@ app.post('/config/exchange', authenticateUser, async (req, res) => {
             res.status(200).json({ 
                 message: `已保存${exchangeSettings.email}的Exchange设置。`,
                 usingDirectEws: !!exchangeSettings.ewsUrl,
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -397,7 +395,7 @@ app.get('/config/exchange', authenticateUser, async (req, res) => {
 
     try {
         // 使用本地设置服务获取Exchange设置
-        const settings = await localSettingsService.getExchangeSettings(userId);
+        const settings = await newSettingsService.getExchangeSettings(userId);
         
         // 更新内存缓存，但不暴露密码
         exchangeSettings = { ...settings };
@@ -439,7 +437,7 @@ app.post('/config/imap', optionalAuth, async (req, res) => {
             
             res.status(200).json({ 
                 message: `已保存${imapSettings.email}的IMAP设置。`,
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -455,7 +453,7 @@ app.get('/config/imap', optionalAuth, async (req, res) => {
     
     try {
         // 使用本地设置服务获取IMAP设置
-        const settings = await localSettingsService.getImapSettings(userToken);
+        const settings = await newSettingsService.getImapSettings(userToken);
         
         // 更新内存缓存，但不暴露密码
         imapSettings = { ...settings };
@@ -487,7 +485,7 @@ app.post('/config/caldav', optionalAuth, async (req, res) => {
     
     try {
         // 使用本地设置服务保存CalDAV设置
-        const success = await localSettingsService.saveCalDAVSettings(settingsToSave, userToken);
+        const success = await newSettingsService.saveCalDAVSettings(settingsToSave, userToken);
         
         if (success) {
             // 更新内存缓存
@@ -495,7 +493,7 @@ app.post('/config/caldav', optionalAuth, async (req, res) => {
             
             res.status(200).json({ 
                 message: `已保存${caldavSettings.username}的CalDAV设置。`,
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -511,7 +509,7 @@ app.get('/config/caldav', optionalAuth, async (req, res) => {
     
     try {
         // 使用本地设置服务获取CalDAV设置
-        const settings = await localSettingsService.getCalDAVSettings(userToken);
+        const settings = await newSettingsService.getCalDAVSettings(userToken);
         
         // 更新内存缓存，但不暴露密码
         caldavSettings = { ...settings };
@@ -535,7 +533,7 @@ app.get('/settings/llm', authenticateUser, async (req, res) => {
     try {
         console.log('[LLM设置API] 获取前端安全配置，用户ID:', userId);
         // 返回前端安全版本的LLM设置（包含占位符）
-        const settings = localSettingsService.getCalendarLLMSettings(userId);
+        const settings = newSettingsService.getCalendarLLMSettings(userId);
         
         console.log('[LLM设置API] 返回安全配置:', { 
             provider: settings.provider, 
@@ -582,7 +580,7 @@ app.post('/settings/llm', authenticateUser, async (req, res) => {
             console.log('[LLM设置API] 设置保存成功');
             res.status(200).json({
                 message: 'LLM设置已保存。',
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -651,7 +649,7 @@ app.post('/settings/exchange', authenticateUser, async (req, res) => {
     
     try {
         // 使用本地设置服务保存Exchange设置
-        const success = await localSettingsService.saveExchangeSettings(validatedSettings, userId);
+        const success = await newSettingsService.saveExchangeSettings(validatedSettings, userId);
         
         if (success) {
             // 更新内存缓存
@@ -660,7 +658,7 @@ app.post('/settings/exchange', authenticateUser, async (req, res) => {
             res.status(200).json({ 
                 message: `已保存${exchangeSettings.email}的Exchange设置。`,
                 usingDirectEws: !!exchangeSettings.ewsUrl,
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -724,7 +722,7 @@ app.post('/settings/caldav', authenticateUser, async (req, res) => {
     // 如果密码是屏蔽符号，保持原有密码不变
     if (newSettings.password === '********') {
         try {
-            const existingSettings = await localSettingsService.getCalDAVSettings(userId);
+            const existingSettings = await newSettingsService.getCalDAVSettings(userId);
             settingsToSave.password = existingSettings.password || '';
             console.log(`[CalDAV设置API] 保持原有密码不变`);
         } catch (error) {
@@ -744,7 +742,7 @@ app.post('/settings/caldav', authenticateUser, async (req, res) => {
             
             res.status(200).json({ 
                 message: `已保存${caldavSettings.username}的CalDAV设置。`,
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -820,7 +818,7 @@ app.post('/settings/imap', authenticateUser, async (req, res) => {
             
             res.status(200).json({ 
                 message: `已保存${imapSettings.email}的IMAP设置。`,
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
         } else {
             throw new Error('设置管理器保存失败');
@@ -974,7 +972,7 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
             if (userToken && userId) {
                 // 使用内部方法获取用户的真实LLM配置（包含真实API密钥）
                 console.log(`[LLM Parse Util] 获取用户 ${userId} 的内部LLM配置`);
-                const userLlmSettings = localSettingsService.getInternalLLMSettings(userId);
+                const userLlmSettings = newSettingsService.getInternalLLMSettings(userId);
                 if (userLlmSettings) {
                     currentLlmSettings = { ...userLlmSettings };
                     // 更新缓存
@@ -991,7 +989,7 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
             } else {
                 // 没有用户认证时，使用内部全局设置
                 console.log('[LLM Parse Util] 无用户认证，使用内部全局LLM配置');
-                const globalLlmSettings = localSettingsService.getInternalLLMSettings();
+                const globalLlmSettings = newSettingsService.getInternalLLMSettings();
                 if (globalLlmSettings) {
                     currentLlmSettings = { ...globalLlmSettings };
                 } else {
@@ -1077,10 +1075,45 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
 - "end_datetime": string | null (转换后的 UTC 时间，如果未指定则推断默认时长1小时)
 - "description": string | null (事件详细描述)
 - "location": string | null (事件地点)
+时间解析规则：
+    1. 日期和时间必须严格按照 ISO 8601 格式 (YYYY-MM-DDTHH:mm:ss.SSSZ)
+    2. 时区处理：
+        - 所有时间都应转换为 UTC 时间
+        - "早上8点" = 08:00 本地时间 → 转换为 UTC
+        - "晚上10点" = 22:00 本地时间 → 转换为 UTC
+     3. 相对时间解析：
+        - "明天" = 今天日期 + 1天
+        - "后天" = 今天日期 + 2天
+       - "昨天" = 今天日期 - 1天
+    4. 时间点映射：
+       - "凌晨" = 00:00-05:59
+       - "早上/上午" = 06:00-11:59
+       - "中午" = 12:00
+       - "下午" = 13:00-17:59
+       - "晚上" = 18:00-23:59
+    5. 特殊时间点：
+       - "午夜" = 00:00
+       - "正午/中午" = 12:00
+    验证步骤：
+    1. 确认用户表达的意图时间
+    2. 将意图时间转换为本地时间
+    3. 将本地时间转换为 UTC 时间
+    4. 检查转换结果是否符合用户意图
+    示例：
+    用户输入："明天早上8点起床"
+      正确解析：今天是2025-08-11，明天是2025-08-12，早上8点是08:00
+    假设本地时区为UTC+8，则UTC时间为2025-08-12T00:00:00.000Z
+    用户输入："明天晚上十点睡觉"
+     正确解析：今天是2025-08-11，明天是2025-08-12，晚上十点是22:00
+     假设本地时区为UTC+8，则UTC时间为2025-08-12T14:00:00.000Z
+**强制要求:**
+1. 请 **严格** 只返回一个有效的 JSON 对象，不要包含任何额外的文本、解释、注释或格式化。
+2. 不要使用 Markdown 代码块格式（如 \`\`\`json）包裹结果。
+3. 不要在 JSON 对象前后添加任何说明文字。
+4. 确保返回的 JSON 对象是完整且语法正确的。
 
 **特殊情况:**
 如果无法从文本中解析出有效的日期和时间，请确保 "start_datetime" 的值为 null。
-请 **仅** 返回 JSON 对象，不要包含任何额外的解释或注释。
 
 自然语言文本：
 "${text}"
@@ -1096,7 +1129,7 @@ JSON 对象结果：
             const completionParams = {
                 model: modelToUse,
                 messages: [
-                    { role: "system", content: "你是一个精确的自然语言理解助手，负责将用户输入的描述转换为结构化的日历事件 JSON 对象。请务必只返回JSON格式的响应。" },
+                    { role: "system", content: "你是一个精确的自然语言理解助手，专门用于将用户输入的描述转换为结构化的日历事件 JSON 对象。你的任务是严格遵守以下规则：1. 只输出一个有效的 JSON 对象，不包含任何额外的文本、解释或格式化；2. 不要使用 Markdown 代码块格式；3. 确保 JSON 对象语法正确且完整；4. 严格按照指定的字段格式输出。" },
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.2,
@@ -1162,6 +1195,58 @@ JSON 对象结果：
         console.error('[LLM Parse Util] 意外错误:', error);
         return null;
     }
+}
+
+// ===== 日程冲突检测工具函数 =====
+/**
+ * 检查新事件是否与现有事件存在时间冲突
+ * @param {Object} newEvent - 新事件对象
+ * @param {Array} existingEvents - 现有事件数组
+ * @param {string} excludeEventId - 排除的事件ID（用于更新事件时）
+ * @returns {Array} 冲突的事件数组
+ */
+function findConflictingEvents(newEvent, existingEvents, excludeEventId = null) {
+    const newStart = new Date(newEvent.start_datetime);
+    const newEnd = new Date(newEvent.end_datetime || newEvent.start_datetime);
+    
+    // 如果解析日期失败，返回空数组（不检查冲突）
+    if (isNaN(newStart.getTime()) || isNaN(newEnd.getTime())) {
+        console.warn('[冲突检测] 无效的日期时间，跳过冲突检测');
+        return [];
+    }
+    
+    // 如果结束时间早于开始时间，默认设置为开始时间后1小时
+    if (newEnd <= newStart) {
+        newEnd.setTime(newStart.getTime() + 60 * 60 * 1000);
+    }
+    
+    return existingEvents.filter(event => {
+        // 排除要更新的事件本身
+        if (excludeEventId && event.id === excludeEventId) {
+            return false;
+        }
+        
+        // 跳过已完成或已删除的事件
+        if (event.completed || event.locally_deleted_at) {
+            return false;
+        }
+        
+        const eventStart = new Date(event.start_datetime);
+        const eventEnd = new Date(event.end_datetime || event.start_datetime);
+        
+        // 如果现有事件的日期无效，跳过
+        if (isNaN(eventStart.getTime()) || isNaN(eventEnd.getTime())) {
+            return false;
+        }
+        
+        // 如果现有事件结束时间早于开始时间，默认设置为开始时间后1小时
+        if (eventEnd <= eventStart) {
+            eventEnd.setTime(eventStart.getTime() + 60 * 60 * 1000);
+        }
+        
+        // 检查时间重叠：新事件开始时间 < 现有事件结束时间 且 新事件结束时间 > 现有事件开始时间
+        return newStart < eventEnd && newEnd > eventStart;
+    });
 }
 
 // --- 自然语言解析路由 --- (修改为调用 parseTextWithLLM)
@@ -1272,6 +1357,31 @@ app.post('/events', authenticateUser, async (req, res) => {
     try {
         // 加载用户的事件数据
         let userEvents = await loadEvents(userId);
+        
+        // 检查冲突事件（除非强制创建）
+        if (!newEvent.force_create) {
+            const conflictingEvents = findConflictingEvents(eventToSave, userEvents);
+            
+            // 如果存在冲突，返回冲突信息
+            if (conflictingEvents.length > 0) {
+                console.log(`[用户 ${req.user.username}] 检测到时间冲突，冲突事件数量: ${conflictingEvents.length}`);
+                
+                // 返回冲突信息给前端
+                return res.status(409).json({
+                    error: 'schedule_conflict',
+                    message: `检测到时间冲突，与 ${conflictingEvents.length} 个现有事件存在重叠`,
+                    conflicts: conflictingEvents.map(event => ({
+                        id: event.id,
+                        title: event.title,
+                        start_datetime: event.start_datetime,
+                        end_datetime: event.end_datetime,
+                        description: event.description
+                    }))
+                });
+            }
+        } else {
+            console.log(`[用户 ${req.user.username}] 强制创建事件，跳过冲突检测`);
+        }
         
         // 添加新事件
         userEvents.push(eventToSave);
@@ -1408,6 +1518,31 @@ app.put('/events/:id', authenticateUser, async (req, res) => {
 
         console.log(`[PUT /events/:id] 准备更新事件对象:`, updatedEvent);
 
+        // 对于完整更新（涉及时间变更），检查冲突（除非强制更新）
+        if ((fieldKeys.length > 1 || (fieldKeys.length === 1 && fieldKeys[0] !== 'completed')) && !updatedFields.force_create) {
+            // 检查更新后的事件是否与其他事件存在冲突
+            const conflictingEvents = findConflictingEvents(updatedEvent, userEvents, eventId);
+            
+            if (conflictingEvents.length > 0) {
+                console.log(`[用户 ${req.user.username}] 更新事件时检测到时间冲突，冲突事件数量: ${conflictingEvents.length}`);
+                
+                // 返回冲突信息给前端
+                return res.status(409).json({
+                    error: 'schedule_conflict',
+                    message: `更新事件时检测到时间冲突，与 ${conflictingEvents.length} 个现有事件存在重叠`,
+                    conflicts: conflictingEvents.map(event => ({
+                        id: event.id,
+                        title: event.title,
+                        start_datetime: event.start_datetime,
+                        end_datetime: event.end_datetime,
+                        description: event.description
+                    }))
+                });
+            }
+        } else if (updatedFields.force_create) {
+            console.log(`[用户 ${req.user.username}] 强制更新事件，跳过冲突检测`);
+        }
+
         // 更新用户事件数据
         console.log(`[PUT /events/:id] 在索引 ${eventIndex} 更新事件`);
         userEvents[eventIndex] = updatedEvent;
@@ -1507,10 +1642,10 @@ initializeData().then(() => {
          
          try {
              // 为默认用户执行CalDAV同步（TideLog主要是单用户系统）
-             const defaultUserId = localSettingsService.defaultUserId;
+             const defaultUserId = newSettingsService.defaultUserId;
              
              // 获取默认用户的CalDAV设置
-             const userCalDAVSettings = localSettingsService.getCalDAVSettings(defaultUserId);
+             const userCalDAVSettings = newSettingsService.getCalDAVSettings(defaultUserId);
              
              // 检查是否配置了CalDAV
              if (userCalDAVSettings && userCalDAVSettings.username && userCalDAVSettings.password && userCalDAVSettings.serverUrl) {
@@ -1544,7 +1679,7 @@ async function triggerImmediateCalDavSync(userId, eventContext = '事件创建')
         
         // 获取用户的CalDAV设置
         console.log(`[立即同步] 正在获取用户 ${userId} 的CalDAV设置...`);
-        const userCalDAVSettings = localSettingsService.getCalDAVSettings(userId);
+        const userCalDAVSettings = newSettingsService.getCalDAVSettings(userId);
         console.log(`[立即同步] 获取到CalDAV设置:`, {
             hasUsername: !!userCalDAVSettings?.username,
             hasPassword: !!userCalDAVSettings?.password,
@@ -4037,7 +4172,7 @@ app.post('/config/imap-filter', optionalAuth, async (req, res) => {
         res.status(200).json({ 
             message: 'IMAP发件人白名单已保存。', 
             settings: imapFilterSettings,
-                syncedToUnified: await localSettingsService.isUnifiedServiceAvailable()
+                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
         });
         } else {
             throw new Error('设置管理器保存失败');
@@ -4089,7 +4224,7 @@ app.post('/sync/imap', authenticateUser, async (req, res) => {
 
         // 检查IMAP设置是否已配置
         // 注意：performImapSync期望的字段名是 email、imapHost、password
-        // 但localSettingsService返回的字段名是 user、host、password
+        // 但newSettingsService返回的字段名是 user、host、password
         // 需要进行字段名映射
         if (!userImapSettings || !userImapSettings.user || !userImapSettings.password || !userImapSettings.host) {
             console.error('[/sync/imap] IMAP设置未完全配置，当前设置:', {

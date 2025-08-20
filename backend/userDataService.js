@@ -323,13 +323,13 @@ class UserDataService {
         console.log(`[UserDataService] 获取设置类型: ${settingType}, 用户标识: ${userIdOrUsername}`);
         try {
             let settings;
-            // 判断是用户ID还是用户名
-            if (userIdOrUsername.includes('_') || userIdOrUsername.length < 10) {
-                // 可能是用户名
-                settings = await this.getUserSettingsByUsername(userIdOrUsername);
-            } else {
-                // 可能是用户ID
+            // 判断是用户ID还是用户名 - 用户ID通常比较长且包含随机字符
+            if (userIdOrUsername.length > 15) {
+                // 长ID，按用户ID处理
                 settings = await this.getUserSettings(userIdOrUsername);
+            } else {
+                // 短ID，按用户名处理
+                settings = await this.getUserSettingsByUsername(userIdOrUsername);
             }
             
             console.log(`[UserDataService] 用户完整设置:`, settings);
@@ -394,23 +394,23 @@ class UserDataService {
     async saveUserSettingsByType(userIdOrUsername, settingType, settingData, userInfo = null) {
         try {
             let settings;
-            // 判断是用户ID还是用户名
-            if (userIdOrUsername.includes('_') || userIdOrUsername.length < 10) {
-                // 可能是用户名
-                settings = await this.getUserSettingsByUsername(userIdOrUsername);
-                settings[settingType] = {
-                    ...settingData,
-                    updated_at: new Date().toISOString()
-                };
-                await this.saveUserSettingsByUsername(userIdOrUsername, settings);
-            } else {
-                // 可能是用户ID
+            // 判断是用户ID还是用户名 - 用户ID通常比较长且包含随机字符
+            if (userIdOrUsername.length > 15) {
+                // 长ID，按用户ID处理
                 settings = await this.getUserSettings(userIdOrUsername);
                 settings[settingType] = {
                     ...settingData,
                     updated_at: new Date().toISOString()
                 };
                 await this.saveUserSettings(userIdOrUsername, settings);
+            } else {
+                // 短ID，按用户名处理
+                settings = await this.getUserSettingsByUsername(userIdOrUsername);
+                settings[settingType] = {
+                    ...settingData,
+                    updated_at: new Date().toISOString()
+                };
+                await this.saveUserSettingsByUsername(userIdOrUsername, settings);
             }
         } catch (error) {
             if (error.message.includes('用户不存在') || error.message.includes('用户设置文件不存在')) {

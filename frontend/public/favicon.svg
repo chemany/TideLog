@@ -1,28 +1,39 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- 背景圆形 -->
-  <circle cx="16" cy="16" r="16" fill="#0066CC"/>
+  <!-- 背景渐变圆形 -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1E90FF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0066CC;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="waveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#87CEEB;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#B0E0E6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
   
-  <!-- 潮汐波浪 -->
-  <path d="M4 20c2-2 4-2 6 0s4 2 6 0 4-2 6 0 4 2 6 0" stroke="#87CEEB" stroke-width="2" fill="none"/>
-  <path d="M4 24c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0 4 1.5 6 0" stroke="#B0E0E6" stroke-width="1.5" fill="none"/>
+  <circle cx="16" cy="16" r="16" fill="url(#bgGradient)"/>
   
-  <!-- 日历网格 -->
-  <rect x="8" y="6" width="16" height="12" rx="2" fill="#FFFFFF" stroke="#0066CC" stroke-width="1"/>
+  <!-- 增强的潮汐波浪 -->
+  <path d="M4 20c2-2 4-2 6 0s4 2 6 0 4-2 6 0 4 2 6 0" stroke="url(#waveGradient)" stroke-width="2.5" fill="none" opacity="0.9"/>
+  <path d="M4 24c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0 4 1.5 6 0" stroke="#FFFFFF" stroke-width="2" fill="none" opacity="0.7"/>
   
-  <!-- 日历顶部 -->
-  <rect x="8" y="6" width="16" height="3" rx="2" fill="#0066CC"/>
+  <!-- 日历主体 -->
+  <rect x="8" y="6" width="16" height="12" rx="2" fill="#FFFFFF" stroke="#0044AA" stroke-width="1.5"/>
+  
+  <!-- 日历顶部蓝色区域 -->
+  <rect x="8" y="6" width="16" height="3.5" rx="2" fill="#0066CC"/>
   
   <!-- 日历孔 -->
-  <circle cx="11" cy="7.5" r="0.5" fill="#FFFFFF"/>
-  <circle cx="21" cy="7.5" r="0.5" fill="#FFFFFF"/>
+  <circle cx="11" cy="8" r="0.7" fill="#FFFFFF"/>
+  <circle cx="21" cy="8" r="0.7" fill="#FFFFFF"/>
   
   <!-- 日历格子 -->
-  <line x1="12" y1="11" x2="12" y2="17" stroke="#E0E0E0" stroke-width="0.5"/>
-  <line x1="16" y1="11" x2="16" y2="17" stroke="#E0E0E0" stroke-width="0.5"/>
-  <line x1="20" y1="11" x2="20" y2="17" stroke="#E0E0E0" stroke-width="0.5"/>
-  <line x1="9" y1="13" x2="23" y2="13" stroke="#E0E0E0" stroke-width="0.5"/>
-  <line x1="9" y1="15" x2="23" y2="15" stroke="#E0E0E0" stroke-width="0.5"/>
+  <line x1="12" y1="11.5" x2="12" y2="17" stroke="#E5E5E5" stroke-width="0.8"/>
+  <line x1="16" y1="11.5" x2="16" y2="17" stroke="#E5E5E5" stroke-width="0.8"/>
+  <line x1="20" y1="11.5" x2="20" y2="17" stroke="#E5E5E5" stroke-width="0.8"/>
+  <line x1="9" y1="13.5" x2="23" y2="13.5" stroke="#E5E5E5" stroke-width="0.8"/>
+  <line x1="9" y1="15.5" x2="23" y2="15.5" stroke="#E5E5E5" stroke-width="0.8"/>
   
   <!-- 今日标记 -->
-  <circle cx="14" cy="14" r="1.5" fill="#FF6B6B"/>
+  <circle cx="14" cy="14.5" r="1.8" fill="#FF4757" stroke="#FFFFFF" stroke-width="0.5"/>
 </svg> 

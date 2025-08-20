@@ -95,7 +95,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
         }));
 
         // 定位到正确的选项卡
-        if (provider === 'builtin' || provider === 'builtin-free') {
+        if (provider === 'builtin' || provider === 'builtin-free' || provider === 'builtin-tidelog') {
           setActiveLlmTab('builtin'); 
         } else if (provider !== 'none') {
           setActiveLlmTab('custom');
@@ -161,7 +161,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
     setSaveStatus('saving');
     
     try {
-      const settingsToSave = { ...llmSettings };
+      let settingsToSave = { ...llmSettings };
       
       // 处理API密钥：如果显示的是占位符，保持原有密钥
       if (settingsToSave.api_key === '********' || settingsToSave.api_key === '' || settingsToSave.api_key === 'BUILTIN_PROXY') {
@@ -170,7 +170,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
           const currentSettings = await hybridSettingsService.getLLMSettings(true);
           if (currentSettings && currentSettings.api_key) {
             // 如果当前显示的是占位符或空值，且后端有实际的密钥，则保留后端的密钥
-            if ((settingsToSave.api_key === '********' || settingsToSave.api_key === '') && 
+            if ((settingsToSave.api_key === '********' || settingsToSave.api_key === '') &&
                 currentSettings.api_key !== 'BUILTIN_PROXY') {
               settingsToSave.api_key = currentSettings.api_key;
             } else if (settingsToSave.api_key === 'BUILTIN_PROXY') {
@@ -184,6 +184,19 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
       
       // 移除前端显示用的字段
       delete settingsToSave._hasApiKey;
+      
+      // 如果是内置免费模型，转换为与安卓端和灵枢笔记相同的格式
+      if (settingsToSave.provider === 'builtin-free') {
+        settingsToSave = {
+          provider: 'builtin',
+          model_name: 'USE_DEFAULT_CONFIG',
+          api_key: 'USE_DEFAULT_CONFIG',
+          base_url: 'USE_DEFAULT_CONFIG',
+          temperature: settingsToSave.temperature || 0.7,
+          max_tokens: settingsToSave.maxTokens || 2000,
+          updated_at: new Date().toISOString()
+        };
+      }
       
       const success = await hybridSettingsService.saveLLMSettings(settingsToSave);
       if (success) {
@@ -463,7 +476,7 @@ const SettingsPanel = ({ open, onClose, refreshEvents }) => {
                     }
                     
                     // 根据选择切换相应的子选项卡
-                    if (newProvider === 'builtin' || newProvider === 'builtin-free') {
+                    if (newProvider === 'builtin' || newProvider === 'builtin-free' || newProvider === 'builtin-tidelog') {
                       setActiveLlmTab('builtin');
                     } else if (newProvider !== 'none') {
                       setActiveLlmTab('custom');

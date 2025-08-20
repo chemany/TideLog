@@ -7,6 +7,7 @@ const userDataService = require('./userDataService');
 
 class NewSettingsService {
     constructor() {
+        this.defaultUserId = 'jason'; // 默认用户ID
         console.log('[NewSettingsService] 初始化新的设置服务');
     }
 
@@ -223,14 +224,14 @@ class NewSettingsService {
             const defaultModels = this.getDefaultModels();
             console.log(`[NewSettingsService] 默认模型配置:`, defaultModels);
 
-            if (defaultModels?.builtin_free) {
+            if (defaultModels?.builtin_free_tidelog) {
                 const processedSettings = {
                     provider: 'builtin-free',
-                    model: defaultModels.builtin_free.model_name || 'deepseek/deepseek-chat-v3-0324:free',
+                    model: defaultModels.builtin_free_tidelog.model_name || 'deepseek/deepseek-chat-v3-0324:free',
                     api_key: 'BUILTIN_PROXY', // 前端显示用占位符
                     base_url: 'BUILTIN_PROXY', // 前端显示用占位符
-                    temperature: defaultModels.builtin_free.temperature || 0.7,
-                    max_tokens: defaultModels.builtin_free.max_tokens || 2000,
+                    temperature: defaultModels.builtin_free_tidelog.temperature || 0.7,
+                    max_tokens: defaultModels.builtin_free_tidelog.max_tokens || 2000,
                     updated_at: llmSettings.updated_at || new Date().toISOString()
                 };
 
@@ -260,7 +261,7 @@ class NewSettingsService {
     getDefaultModels() {
         const fs = require('fs');
         const path = require('path');
-        const defaultModelsPath = 'C:\\code\\unified-settings-service\\config\\default-models.json';
+        const defaultModelsPath = '/home/jason/code/unified-settings-service/config/default-models.json';
 
         try {
             if (fs.existsSync(defaultModelsPath)) {
@@ -323,6 +324,75 @@ class NewSettingsService {
     async isUnifiedServiceAvailable() {
         // 新的用户数据服务总是可用的
         return true;
+    }
+
+    /**
+     * 获取所有设置（兼容settingsManager.getAllSettings）
+     */
+    async getAllSettings(userId) {
+        try {
+            const settings = await userDataService.getUserSettings(userId);
+            return {
+                llm: await this.getLLMSettings(userId),
+                caldav: await this.getCalDAVSettings(userId),
+                imap: await this.getImapSettings(userId),
+                exchange: await this.getExchangeSettings(userId),
+                imap_filter: await this.getImapFilterSettings(userId)
+            };
+        } catch (error) {
+            console.error(`[NewSettingsService] 获取所有设置失败 - userId: ${userId}`, error);
+            return {};
+        }
+    }
+
+    /**
+     * 获取共享LLM设置
+     */
+    getSharedLLMSettings(userId = 'system-default') {
+        // 返回默认的LLM设置
+        return this.processLLMSettings({
+            provider: 'builtin',
+            model: 'USE_DEFAULT_CONFIG',
+            api_key: 'USE_DEFAULT_CONFIG',
+            base_url: 'USE_DEFAULT_CONFIG',
+            temperature: 0.7,
+            max_tokens: 2000
+        });
+    }
+
+    /**
+     * 获取内部LLM设置（用于AI解析，返回真实API密钥）
+     */
+    getInternalLLMSettings(userId = this.defaultUserId) {
+        const defaultModels = this.getDefaultModels();
+        
+        if (defaultModels?.builtin_free_tidelog) {
+            return {
+                provider: defaultModels.builtin_free_tidelog.provider || 'builtin',
+                model: defaultModels.builtin_free_tidelog.model_name || 'deepseek/deepseek-chat-v3-0324:free',
+                api_key: defaultModels.builtin_free_tidelog.api_key || '',
+                base_url: defaultModels.builtin_free_tidelog.base_url || 'https://api-inference.modelscope.cn/v1',
+                temperature: defaultModels.builtin_free_tidelog.temperature || 0.7,
+                max_tokens: defaultModels.builtin_free_tidelog.max_tokens || 2000
+            };
+        }
+
+        // 回退到默认设置
+        return {
+            provider: 'builtin',
+            model: 'deepseek/deepseek-chat-v3-0324:free',
+            api_key: '',
+            base_url: 'https://api-inference.modelscope.cn/v1',
+            temperature: 0.7,
+            max_tokens: 2000
+        };
+    }
+
+    /**
+     * 获取日历LLM设置（兼容方法）
+     */
+    getCalendarLLMSettings(userId) {
+        return this.getSharedLLMSettings(userId);
     }
 }
 

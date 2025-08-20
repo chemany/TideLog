@@ -33,8 +33,8 @@ const getUnifiedSettingsApiBase = () => {
   } else {
     // 外网环境，但如果是cheman.top域名，说明是通过隧道访问本机服务
     if (hostname === 'www.cheman.top' || hostname === 'cheman.top') {
-      console.log(`[统一设置服务] 检测到cheman.top域名(${hostname})，使用直接API路径`);
-      return `${protocol}//${hostname}/api`;
+      console.log(`[统一设置服务] 检测到cheman.top域名(${hostname})，通过隧道访问`);
+      return `${protocol}//${hostname}/unified-settings/api`;
     } else {
       // 其他外网环境，使用nginx代理路径
       console.log(`[统一设置服务] 检测到外网环境(${hostname}:${port})，使用nginx代理路径`);
@@ -44,6 +44,9 @@ const getUnifiedSettingsApiBase = () => {
 };
 
 const API_BASE = getUnifiedSettingsApiBase();
+
+// 调试信息：显示实际使用的API基础地址
+console.log('[统一设置服务] 实际使用的API基础地址:', API_BASE);
 
 class UnifiedSettingsService {
     constructor() {

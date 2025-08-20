@@ -276,15 +276,15 @@ class LocalSettingsService {
         // 获取默认模型配置
         const defaultModels = this.getDefaultModels();
 
-        if ((currentProvider === 'builtin' || currentProvider === 'builtin-free') && defaultModels?.builtin_free) {
+        if ((currentProvider === 'builtin' || currentProvider === 'builtin-free') && defaultModels?.builtin_free_tidelog) {
             // 内置模型使用安全配置
             return {
                 provider: 'builtin-free',
                 api_key: 'BUILTIN_PROXY',
                 base_url: 'BUILTIN_PROXY',
-                model_name: defaultModels.builtin_free.model_name || 'deepseek/deepseek-chat-v3-0324:free',
-                temperature: defaultModels.builtin_free.temperature || 0.7,
-                max_tokens: defaultModels.builtin_free.max_tokens || 2000,
+                model_name: defaultModels.builtin_free_tidelog.model_name || 'deepseek/deepseek-chat-v3-0324:free',
+                temperature: defaultModels.builtin_free_tidelog.temperature || 0.7,
+                max_tokens: defaultModels.builtin_free_tidelog.max_tokens || 2000,
                 use_custom_model: false
             };
         } else {
@@ -347,14 +347,14 @@ class LocalSettingsService {
             const defaultModels = this.getDefaultModels();
             console.log(`[LocalSettingsService] 默认模型配置:`, defaultModels);
 
-            if (defaultModels?.builtin_free) {
+            if (defaultModels?.builtin_free_tidelog) {
                 const processedSettings = {
                     provider: 'builtin-free',
                     api_key: 'BUILTIN_PROXY', // 前端显示用占位符
                     base_url: 'BUILTIN_PROXY', // 前端显示用占位符
-                    model_name: defaultModels.builtin_free.model_name || 'deepseek/deepseek-chat-v3-0324:free',
-                    temperature: defaultModels.builtin_free.temperature || 0.7,
-                    max_tokens: defaultModels.builtin_free.max_tokens || 2000,
+                    model_name: defaultModels.builtin_free_tidelog.model_name || 'deepseek/deepseek-chat-v3-0324:free',
+                    temperature: defaultModels.builtin_free_tidelog.temperature || 0.7,
+                    max_tokens: defaultModels.builtin_free_tidelog.max_tokens || 2000,
                     use_custom_model: false
                 };
 
@@ -567,18 +567,8 @@ class LocalSettingsService {
     getDefaultModels() {
         const config = this.readJsonFile(this.defaultModelsPath, {});
         
-        // 为了安全，移除内置模型的真实API密钥
-        if (config.builtin_free) {
-            return {
-                ...config,
-                builtin_free: {
-                    ...config.builtin_free,
-                    api_key: 'BUILTIN_PROXY', // 使用占位符
-                    base_url: 'BUILTIN_PROXY' // 使用占位符
-                }
-            };
-        }
-        
+        // 直接返回完整配置，供内部处理逻辑使用
+        // 注意：这个方法不直接暴露给前端，安全处理在其他地方
         return config;
     }
 

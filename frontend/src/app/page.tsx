@@ -173,6 +173,19 @@ export default function CalendarPage() {
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState<boolean>(false);
   const [eventToDeleteInfo, setEventToDeleteInfo] = useState<{ id: string | number | null, title: string | null }>({ id: null, title: null });
   
+  // 冲突检测相关状态
+  const [showConflictModal, setShowConflictModal] = useState<boolean>(false);
+  const [conflictData, setConflictData] = useState<{
+    eventData: Omit<MyCalendarEvent, 'id'> & { id?: string | number } | null;
+    conflicts: Array<{
+      id: string | number;
+      title: string;
+      start_datetime: string;
+      end_datetime: string;
+      description?: string;
+    }>;
+  }>({ eventData: null, conflicts: [] });
+  
   // 认证相关状态
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -382,6 +395,22 @@ export default function CalendarPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        
+        // 处理冲突检测
+        if (response.status === 409 && errorData.error === 'schedule_conflict') {
+          console.log('检测到时间冲突:', errorData);
+          
+          // 存储冲突信息并显示冲突处理模态框
+          setConflictData({
+            eventData: eventData,
+            conflicts: errorData.conflicts || []
+          });
+          setShowConflictModal(true);
+          
+          toast.error(errorData.message || '检测到时间冲突', { id: toastId });
+          return; // 不关闭创建模态框，让用户选择如何处理
+        }
+        
         throw new Error(errorData.detail || `${eventData.id ? '更新' : '创建'}失败: ${response.statusText}`);
       }
 
@@ -1021,6 +1050,90 @@ export default function CalendarPage() {
     }
   }, [events, setEvents]);
 
+  /**
+   * 强制保存事件（忽略冲突）
+   */
+  const handleForceCreateEvent = async () => {
+    if (!conflictData.eventData) return;
+    
+    const toastId = toast.loading("强制保存事件...");
+    
+    const payload: EventCreatePayload & { id?: string | number; source?: string; force_create?: boolean } = {
+      ...conflictData.eventData.id ? { id: conflictData.eventData.id } : {},
+      title: conflictData.eventData.title || undefined,
+      start_datetime: conflictData.eventData.start ? conflictData.eventData.start.toISOString() : undefined,
+      end_datetime: conflictData.eventData.end ? conflictData.eventData.end.toISOString() : null,
+      is_all_day: conflictData.eventData.allDay || false,
+      description: conflictData.eventData.description || undefined,
+      location: conflictData.eventData.location || undefined,
+      source: conflictData.eventData.id ? undefined : 'manual_ui',
+      force_create: true // 添加强制创建标志
+    };
+
+    const apiUrl = conflictData.eventData.id ? `${getApiBaseUrl()}/events/${conflictData.eventData.id}` : `${getApiBaseUrl()}/events`;
+    const apiMethod = conflictData.eventData.id ? 'PUT' : 'POST';
+
+    try {
+      const response = await authenticatedFetch(apiUrl, {
+        method: apiMethod,
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `强制保存失败: ${response.statusText}`);
+      }
+
+      const savedEventRaw: RawBackendEvent = await response.json();
+      const savedCalendarEvent: MyCalendarEvent = {
+        id: savedEventRaw.id,
+        title: savedEventRaw.title || '无标题事件',
+        start: new Date(savedEventRaw.start_datetime),
+        end: savedEventRaw.end_datetime ? new Date(savedEventRaw.end_datetime) : new Date(new Date(savedEventRaw.start_datetime).getTime() + 60*60*1000),
+        allDay: savedEventRaw.is_all_day || false,
+        completed: savedEventRaw.completed || false,
+        description: savedEventRaw.description,
+        location: savedEventRaw.location,
+        created_at: savedEventRaw.created_at ? new Date(savedEventRaw.created_at) : undefined,
+        updated_at: savedEventRaw.updated_at ? new Date(savedEventRaw.updated_at) : undefined,
+      };
+
+      // Update the events state
+      if (conflictData.eventData.id) {
+        setEvents(prevEvents => prevEvents.map(ev => ev.id === savedCalendarEvent.id ? savedCalendarEvent : ev));
+      } else {
+        setEvents(prevEvents => [...prevEvents, savedCalendarEvent]);
+      }
+
+      // 关闭所有模态框
+      setShowCreateModal(false);
+      setShowConflictModal(false);
+      setConflictData({ eventData: null, conflicts: [] });
+      
+      toast.success(`事件已强制${conflictData.eventData.id ? '更新' : '创建'}！`, { id: toastId });
+
+    } catch (error) {
+      console.error('强制保存事件时出错:', error);
+      toast.error(`强制保存出错: ${error instanceof Error ? error.message : '未知错误'}`, { id: toastId });
+    }
+  };
+
+  /**
+   * 编辑冲突事件
+   */
+  const handleEditConflictEvent = (conflictEventId: string | number) => {
+    const conflictEvent = events.find(event => event.id === conflictEventId);
+    if (conflictEvent) {
+      // 关闭冲突模态框
+      setShowConflictModal(false);
+      
+      // 设置要编辑的事件并打开编辑模态框
+      setSelectedEvent(conflictEvent);
+      setSelectedSlot(null);
+      setShowCreateModal(true);
+    }
+  };
+
   // 优化的 Calendar 组件配置
   const eventComponent = useCallback((props: any) => (
     <div className="calendar-event">
@@ -1261,6 +1374,94 @@ export default function CalendarPage() {
           refreshEvents={fetchEvents} 
         />
       )}
+
+      {/* 冲突处理模态框 */}
+      <Modal
+        open={showConflictModal}
+        onClose={() => {
+          setShowConflictModal(false);
+          setConflictData({ eventData: null, conflicts: [] });
+        }}
+        aria-labelledby="conflict-modal-title"
+      >
+        <Box sx={{ 
+          ...optimizedModalStyle, 
+          width: 600, 
+          maxHeight: '80vh', 
+          overflowY: 'auto' 
+        }}>
+          <h3 id="conflict-modal-title" className="text-lg leading-6 font-medium text-gray-900 text-center mb-4">
+            检测到时间冲突
+          </h3>
+          
+          <div className="mb-4">
+            <p className="text-sm text-gray-700 mb-2">
+              您要创建的事件与以下 {conflictData.conflicts.length} 个现有事件存在时间重叠：
+            </p>
+            
+            <div className="max-h-48 overflow-y-auto border border-gray-200 rounded p-2 bg-gray-50">
+              {conflictData.conflicts.map((conflict, index) => (
+                <div key={conflict.id} className="mb-2 p-2 bg-white rounded border">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h4 className="font-medium text-gray-900">{conflict.title}</h4>
+                      <p className="text-sm text-gray-600">
+                        {new Date(conflict.start_datetime).toLocaleString('zh-CN', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })} - {new Date(conflict.end_datetime).toLocaleString('zh-CN', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                      {conflict.description && (
+                        <p className="text-xs text-gray-500 mt-1">{conflict.description}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleEditConflictEvent(conflict.id)}
+                      className="ml-2 px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded text-xs"
+                    >
+                      编辑
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+            <p className="text-sm text-yellow-800">
+              <strong>您的选择：</strong>
+            </p>
+            <ul className="text-sm text-yellow-700 mt-1 list-disc list-inside">
+              <li>点击"仍要创建"将创建重叠的事件</li>
+              <li>点击上方"编辑"按钮修改冲突的现有事件</li>
+              <li>点击"取消"返回修改您要创建的事件时间</li>
+            </ul>
+          </div>
+          
+          <div className="flex justify-center space-x-4">
+            <button
+              onClick={() => {
+                setShowConflictModal(false);
+                setConflictData({ eventData: null, conflicts: [] });
+              }}
+              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md text-sm font-medium shadow-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleForceCreateEvent}
+              className="px-4 py-2 bg-orange-600 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+            >
+              仍要创建
+            </button>
+          </div>
+        </Box>
+      </Modal>
 
       {/* 登录对话框 */}
       <LoginDialog
