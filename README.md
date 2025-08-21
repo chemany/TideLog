@@ -113,7 +113,6 @@
    - 前端: http://localhost:11000/calendars/
    - 后端API: http://localhost:11001
    - 统一设置服务: http://localhost:3002
-   - 外网访问: http://jason.cheman.top:8081/calendars/
 
 ## ⚙️ 配置说明
 
