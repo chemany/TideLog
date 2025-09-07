@@ -18,6 +18,7 @@ interface CreateEventModalProps {
   slotInfo: SlotInfo | null;
   eventData?: MyCalendarEvent | null;
   onSave: (eventData: Omit<MyCalendarEvent, 'id'> & { id?: string | number }) => void;
+  existingEvents?: MyCalendarEvent[];
 }
 
 /**
@@ -30,6 +31,7 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
   slotInfo,
   eventData,
   onSave,
+  existingEvents = [],
 }) => {
   // --- State for form fields ---
   const [title, setTitle] = useState('');
@@ -38,6 +40,8 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
   const [isAllDay, setIsAllDay] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [endTime, setEndTime] = useState<Date | null>(null);
+  const [conflicts, setConflicts] = useState<MyCalendarEvent[]>([]);
+  const [isEndTimeManuallyModified, setIsEndTimeManuallyModified] = useState(false);
 
   /**
    * Effect Hook: 当 slotInfo 或 eventData 变化时，更新模态框内的起止时间
@@ -49,22 +53,40 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
       if (eventData.id) {
         // Editing mode: Populate from existing eventData (has an ID)
         setTitle(eventData.title || '');
-        setStartTime(eventData.start || null);
-        setEndTime(eventData.end || null);
+        const eventStart = eventData.start || null;
+        setStartTime(eventStart);
+        
+        // 如果没有结束时间或结束时间不合适，设置为开始时间+1小时
+        let eventEnd = eventData.end || null;
+        if (eventStart && (!eventEnd || eventEnd <= eventStart)) {
+          eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000);
+        }
+        setEndTime(eventEnd);
+        
         setIsAllDay(eventData.allDay || false);
         setDescription(eventData.description || '');
         setLocation(eventData.location || ''); // 编辑时加载地点
+        setIsEndTimeManuallyModified(false); // 重置手动修改标记
       } else {
         // Pre-filling from LLM suggestion: eventData exists but has no ID (or ID is falsy)
         // 这通常意味着这是后端 /events/parse-natural-language 返回的数据
         setTitle(eventData.title || '');
         // 后端返回的 start_datetime, end_datetime 是字符串，需要转换为 Date 对象
         // MyCalendarEvent 类型定义中 start/end 已经是 Date，假设上层在传递 eventData 时已转换
-        setStartTime(eventData.start || null); 
-        setEndTime(eventData.end || null);
+        const eventStart = eventData.start || null;
+        setStartTime(eventStart);
+        
+        // 如果没有结束时间或结束时间不合适，设置为开始时间+1小时
+        let eventEnd = eventData.end || null;
+        if (eventStart && (!eventEnd || eventEnd <= eventStart)) {
+          eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000);
+        }
+        setEndTime(eventEnd);
+        
         setIsAllDay(eventData.allDay || false);
         setDescription(eventData.description || '');
         setLocation(eventData.location || ''); // <--- 从LLM预填充地点
+        setIsEndTimeManuallyModified(false); // 重置手动修改标记
       }
     } else if (slotInfo) {
       // Creation mode from calendar slot: Populate from slotInfo (no LLM data involved here directly)
@@ -91,6 +113,7 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
       setIsAllDay(false); 
       setDescription('');
       setLocation(''); // 从日历槽创建时，地点默认为空
+      setIsEndTimeManuallyModified(false); // 重置手动修改标记
     } else {
       // Reset form if neither is provided
       setTitle('');
@@ -99,8 +122,45 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
       setIsAllDay(false);
       setDescription('');
       setLocation('');
+      setIsEndTimeManuallyModified(false); // 重置手动修改标记
     }
   }, [isOpen, slotInfo, eventData]);
+
+  /**
+   * Effect Hook: 当时间变化时检测冲突
+   */
+  useEffect(() => {
+    if (!startTime || !endTime) {
+      setConflicts([]);
+      return;
+    }
+
+    const currentConflicts = existingEvents.filter(event => {
+      // 排除当前正在编辑的事件
+      if (eventData && event.id === eventData.id) return false;
+      
+      // 检查时间重叠
+      return (
+        (startTime >= event.start && startTime < event.end) ||
+        (endTime > event.start && endTime <= event.end) ||
+        (startTime <= event.start && endTime >= event.end)
+      );
+    });
+
+    setConflicts(currentConflicts);
+  }, [startTime, endTime, existingEvents, eventData]);
+
+  /**
+   * Effect Hook: 当起始时间变化时自动设置结束时间（默认1小时）
+   * 只有在用户没有手动修改过结束时间时才自动更新
+   */
+  useEffect(() => {
+    if (startTime && !isEndTimeManuallyModified) {
+      // 自动设置结束时间为开始时间+1小时
+      const newEndTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+      setEndTime(newEndTime);
+    }
+  }, [startTime, isEndTimeManuallyModified]);
 
   /**
    * 处理保存按钮点击事件
@@ -166,6 +226,36 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
              {eventData ? '编辑事件' : '创建新事件'}
           </h3>
           <div className="space-y-3">
+          {/* 冲突提示 */}
+          {conflicts.length > 0 && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800">
+                    检测到 {conflicts.length} 个时间冲突
+                  </h3>
+                  <div className="mt-2 text-sm text-red-700">
+                    <ul className="list-disc list-inside">
+                      {conflicts.slice(0, 3).map(conflict => (
+                        <li key={conflict.id}>
+                          {conflict.title} ({format(conflict.start, 'MM-dd HH:mm')} - {format(conflict.end, 'HH:mm')})
+                        </li>
+                      ))}
+                      {conflicts.length > 3 && (
+                        <li>还有 {conflicts.length - 3} 个冲突...</li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div>
                <label htmlFor="event-title-modal" className="block text-sm font-medium text-gray-700">标题:</label>
             <input
@@ -184,20 +274,31 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
                  type="datetime-local"
                  id="event-start-modal"
                  value={startTime ? format(startTime, "yyyy-MM-dd'T'HH:mm") : ''}
-                 onChange={(e) => setStartTime(e.target.value ? parse(e.target.value, "yyyy-MM-dd'T'HH:mm", new Date()) : null)}
+                 onChange={(e) => {
+  const newStartTime = e.target.value ? parse(e.target.value, "yyyy-MM-dd'T'HH:mm", new Date()) : null;
+  setStartTime(newStartTime);
+}}
                  required
-                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                 className={`mt-1 w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                   conflicts.length > 0 ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                 }`}
                />
             </div>
              <div>
-               <label htmlFor="event-end-modal" className="block text-sm font-medium text-gray-700">结束时间 (可选):</label>
+               <label htmlFor="event-end-modal" className="block text-sm font-medium text-gray-700">结束时间:</label>
               <input
                  type="datetime-local"
                  id="event-end-modal"
                  value={endTime ? format(endTime, "yyyy-MM-dd'T'HH:mm") : ''}
-                 onChange={(e) => setEndTime(e.target.value ? parse(e.target.value, "yyyy-MM-dd'T'HH:mm", new Date()) : null)}
+                 onChange={(e) => {
+  const newEndTime = e.target.value ? parse(e.target.value, "yyyy-MM-dd'T'HH:mm", new Date()) : null;
+  setEndTime(newEndTime);
+  setIsEndTimeManuallyModified(true); // 标记用户手动修改了结束时间
+}}
                  min={startTime ? format(startTime, "yyyy-MM-dd'T'HH:mm") : undefined}
-                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                 className={`mt-1 w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                   conflicts.length > 0 ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                 }`}
                />
           </div>
           <div>
