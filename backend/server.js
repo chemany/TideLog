@@ -5,24 +5,9 @@ console.log(`[TideLog] 环境变量加载: STORAGE_TYPE=${process.env.STORAGE_TY
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const EWS = require('node-ews');
 const fs = require('fs');
 const fetch = require('node-fetch');
 const xml2js = require('xml2js');
-// 导入 ews-javascript-api 相关类
-const { 
-    ExchangeService, 
-    WebCredentials, 
-    Uri, 
-    FolderId, 
-    WellKnownFolderName, 
-    CalendarView, 
-    PropertySet, 
-    BasePropertySet, 
-    ItemSchema, 
-    DateTime, 
-    ExchangeVersion 
-} = require('ews-javascript-api');
 // 导入 ActiveSync 客户端库
 // const asclient = require('asclient'); // 不再需要 ActiveSync 测试库
 // 导入存储函数
@@ -42,10 +27,6 @@ const {
 const { authenticateUser, optionalAuth, getCurrentUserId, isAuthenticated } = require('./auth');
 // 导入设置服务（已统一为newSettingsService）
 const newSettingsService = require('./newSettingsService');
-// --- 导入新的 EAS 同步函数 ---
-const { syncQQViaEAS } = require('./eas_sync'); 
-const { syncOutlookViaEWS } = require('./outlook_ews_sync'); // <-- 导入新的 Outlook EWS 同步函数
-// ---------------------------
 
 // 可能需要安装这些模块
 // npm install imap mailparser caldav ical
@@ -84,7 +65,6 @@ let llmConfigCache = {
 };
 
 let eventsDb = [];
-let exchangeSettings = {};
 let imapSettings = {};
 let caldavSettings = {};
 let imapFilterSettings = { sender_allowlist: [] }; // <-- 初始化新的内存缓存
@@ -126,7 +106,6 @@ async function initializeData() {
         const allSettings = await newSettingsService.getAllSettings(systemUserId);
 
         llmSettings = allSettings.llm;
-        exchangeSettings = allSettings.exchange;
         imapSettings = allSettings.imap;
         caldavSettings = allSettings.caldav;
         imapFilterSettings = allSettings.imapFilter;
@@ -137,7 +116,6 @@ async function initializeData() {
         console.log('[初始化] 设置加载完成:');
         console.log("  - LLM设置:", { provider: llmSettings.provider, model: llmSettings.model_name });
         console.log(`  - 事件数据: ${eventsDb.length}个`);
-        console.log("  - Exchange设置:", exchangeSettings.email ? '已配置' : '未配置');
         console.log("  - IMAP设置:", imapSettings.host ? '已配置' : '未配置');
         console.log("  - CalDAV设置:", Object.keys(caldavSettings).length > 0 ? '已配置' : '未配置');
         console.log("  - IMAP过滤设置:", `白名单${imapFilterSettings.sender_allowlist?.length || 0}项`);
@@ -148,7 +126,6 @@ async function initializeData() {
         // 回退到旧的加载方式
         llmSettings = await loadLLMSettings();
         eventsDb = await loadEvents();
-        exchangeSettings = await loadExchangeSettings();
         imapSettings = await loadImapSettings();
         
         try {
@@ -349,66 +326,6 @@ app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
     }
 });
 
-// --- Exchange配置路由 ---
-app.post('/config/exchange', authenticateUser, async (req, res) => {
-    const newSettings = req.body;
-    if (!newSettings || typeof newSettings.email !== 'string' || typeof newSettings.password !== 'string') {
-        return res.status(400).json({ error: '无效的Exchange设置格式。必需: email, password。' });
-    }
-
-    // 当前支持的可选参数: ewsUrl, exchangeVersion
-    const validatedSettings = {
-        email: newSettings.email,
-        password: newSettings.password,
-        // 可选的 EWS URL (如果不想用 Autodiscover)
-        ewsUrl: newSettings.ewsUrl || null,
-        // 可选的 Exchange 版本 (默认 Exchange2013)
-        exchangeVersion: newSettings.exchangeVersion || 'Exchange2013'
-    };
-
-    const userId = getCurrentUserId(req);
-
-    try {
-        // 使用本地设置服务保存Exchange设置
-        const success = await newSettingsService.saveExchangeSettings(validatedSettings, userId);
-        
-        if (success) {
-            // 更新内存缓存
-            exchangeSettings = { ...validatedSettings };
-            
-            res.status(200).json({ 
-                message: `已保存${exchangeSettings.email}的Exchange设置。`,
-                usingDirectEws: !!exchangeSettings.ewsUrl,
-                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
-            });
-        } else {
-            throw new Error('设置管理器保存失败');
-        }
-    } catch (error) {
-        console.error("[Exchange配置] 保存失败:", error);
-        res.status(500).json({ error: "保存Exchange设置失败。" });
-    }
-});
-
-app.get('/config/exchange', authenticateUser, async (req, res) => {
-    const userId = getCurrentUserId(req);
-
-    try {
-        // 使用本地设置服务获取Exchange设置
-        const settings = await newSettingsService.getExchangeSettings(userId);
-        
-        // 更新内存缓存，但不暴露密码
-        exchangeSettings = { ...settings };
-        const { password, ...settingsToSend } = settings;
-        
-        res.status(200).json(settingsToSend);
-    } catch (error) {
-        console.error('[Exchange配置] 获取设置失败:', error);
-        // 发生错误时返回本地设置（不含密码）
-        const { password, ...settingsToSend } = exchangeSettings;
-        res.status(200).json(settingsToSend);
-    }
-});
 
 // --- IMAP配置路由 ---
 app.post('/config/imap', optionalAuth, async (req, res) => {
@@ -591,83 +508,7 @@ app.post('/settings/llm', authenticateUser, async (req, res) => {
     }
 });
 
-// Exchange设置API
-app.get('/settings/exchange', authenticateUser, async (req, res) => {
-    const userId = getCurrentUserId(req);
-    console.log(`[Exchange设置API] 获取Exchange设置 - userId: ${userId}`);
-    
-    try {
-        // 使用新的设置服务获取Exchange设置
-        const userInfo = { username: req.user.username, email: req.user.email };
-        const settings = await newSettingsService.getExchangeSettings(userId, userInfo);
-        console.log(`[Exchange设置API] 读取到的设置:`, settings);
-        
-        // 更新内存缓存
-        exchangeSettings = { ...settings };
-        
-        // 转换为前端期望的格式并移除密码，但添加密码状态指示
-        const frontendSettings = {
-            email: settings.email || '',
-            password: settings.password ? '********' : '', // 显示占位符表示已保存密码
-            ewsUrl: settings.ewsUrl || '',
-            exchangeVersion: settings.exchangeVersion || 'Exchange2013',
-            hasPassword: !!settings.password // 添加密码状态标识
-        };
-        console.log(`[Exchange设置API] 转换为前端格式:`, frontendSettings);
-        
-        res.status(200).json(frontendSettings);
-    } catch (error) {
-        console.error('[Exchange设置API] 获取设置失败:', error);
-        // 发生错误时返回默认设置
-        res.status(200).json({
-            email: '',
-            password: '',
-            ewsUrl: '',
-            exchangeVersion: 'Exchange2013',
-            hasPassword: false
-        });
-    }
-});
 
-app.post('/settings/exchange', authenticateUser, async (req, res) => {
-    const newSettings = req.body;
-    if (!newSettings || typeof newSettings.email !== 'string' || typeof newSettings.password !== 'string') {
-        return res.status(400).json({ error: '无效的Exchange设置格式。必需: email, password。' });
-    }
-    
-    // 当前支持的可选参数: ewsUrl, exchangeVersion
-    const validatedSettings = {
-        email: newSettings.email,
-        password: newSettings.password,
-        // 可选的 EWS URL (如果不想用 Autodiscover)
-        ewsUrl: newSettings.ewsUrl || null,
-        // 可选的 Exchange 版本 (默认 Exchange2013)
-        exchangeVersion: newSettings.exchangeVersion || 'Exchange2013'
-    };
-    
-    const userId = getCurrentUserId(req);
-    
-    try {
-        // 使用本地设置服务保存Exchange设置
-        const success = await newSettingsService.saveExchangeSettings(validatedSettings, userId);
-        
-        if (success) {
-            // 更新内存缓存
-            exchangeSettings = { ...validatedSettings };
-            
-            res.status(200).json({ 
-                message: `已保存${exchangeSettings.email}的Exchange设置。`,
-                usingDirectEws: !!exchangeSettings.ewsUrl,
-                syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
-            });
-        } else {
-            throw new Error('设置管理器保存失败');
-        }
-    } catch (error) {
-        console.error("[Exchange设置API] 保存失败:", error);
-        res.status(500).json({ error: "保存Exchange设置失败。" });
-    }
-});
 
 // CalDAV设置API
 app.get('/settings/caldav', authenticateUser, async (req, res) => {
@@ -833,113 +674,7 @@ app.post('/settings/imap', authenticateUser, async (req, res) => {
 // function getStartEndDateForSync() { ... } 
 const { getStartEndDateForSync } = require('./utils'); // <-- 确保导入或定义了此函数
 
-// --- Exchange (QQ EWS - Python) 同步路由 --- 
-app.post('/sync/exchange', async (req, res) => {
-    // ... (此路由现在只处理 QQ EWS Python 调用) ...
-    // TODO: 考虑将此路由重命名为 /sync/qq-ews-python 或删除其 else 块
-    console.log("Exchange 同步路由被访问 (QQ EWS Python Handler)! GOTO /sync/qq-ews-python?");
-    const currentSettings = exchangeSettings; // 使用已加载的配置
-
-    if (!currentSettings || !currentSettings.email || !currentSettings.password) {
-        return res.status(409).json({ error: 'Exchange 设置未配置。' });
-    }
-    console.log(`已请求同步 Exchange 账户: ${currentSettings.email}.`);
-    const isQQEmail = currentSettings.email.toLowerCase().endsWith('@qq.com');
-
-    if (isQQEmail) {
-        // ... (保持 Python 调用逻辑) ...
-        console.log("检测到 QQ 邮箱，将使用 Python 脚本进行同步。");
-        const { startDate, endDate } = getStartEndDateForSync();
-        const pythonScriptPath = path.join(__dirname, 'python_scripts', 'qq_ews_sync.py');
-        const pythonProcess = spawn('python', [pythonScriptPath]);
-        const inputData = { email: currentSettings.email, password: currentSettings.password, startDate: startDate.toISOString(), endDate: endDate.toISOString() };
-        let scriptOutput = ''; let scriptError = '';
-        pythonProcess.stdin.write(JSON.stringify(inputData)); pythonProcess.stdin.end();
-        pythonProcess.stdout.on('data', (data) => { scriptOutput += data.toString(); });
-        pythonProcess.stderr.on('data', (data) => { scriptError += data.toString(); console.error(`Python 脚本 stderr: ${data}`); });
-        pythonProcess.on('close', (code) => { /* ... Python 结果处理 ... */ });
-        pythonProcess.on('error', (err) => { /* ... Python 错误处理 ... */ });
-            } else {
-        // --- 这个 else 块现在是多余的，逻辑已移到 outlook_ews_sync.js --- 
-        console.warn("非 QQ 邮箱请求到达 /sync/exchange 路由。此路由现在主要用于 QQ EWS Python。请考虑使用 /sync/outlook-ews。");
-        return res.status(400).json({ error: '此路由配置为处理 QQ EWS Python 同步。对于 Outlook/Exchange，请使用 /sync/outlook-ews。' });
-        // --- 结束多余的 else 块 --- 
-    }
-});
-
-// --- IMAP同步路由 --- 
-// ... (保持不变) ...
-
-// --- CalDAV同步路由 (使用 tsdav 重构) ---
-// ... (保持不变) ...
-
-// --- QQ EWS Python 同步路由 --- 
-// ... (此路由可能与 /sync/exchange 重复，建议整合或删除一个) ...
-
-// --- QQ EAS (ActiveSync) 同步路由 ---
-// ... (保持不变) ...
-
-// --- 新增：Outlook/Standard EWS (Node.js) 同步路由 ---
-app.post('/sync/outlook-ews', async (req, res) => {
-    console.log("[/sync/outlook-ews Route] Triggered Standard EWS sync.");
-    const currentSettings = exchangeSettings; // 仍然使用 exchangeSettings 来获取凭据
-
-    // 1. 检查是否配置了 Exchange 设置
-    if (!currentSettings || !currentSettings.email || !currentSettings.password) {
-        return res.status(409).json({ error: 'Exchange settings not configured.' });
-    }
-    // 可选：检查是否 *不是* QQ 邮箱，以防误用
-    if (currentSettings.email.toLowerCase().includes('@qq.com')) {
-        console.warn("[/sync/outlook-ews Route] Received QQ email, but this route is for standard Exchange/Outlook.");
-        // 可以选择拒绝，或继续尝试（但不推荐）
-        // return res.status(400).json({ error: 'This route is for standard Exchange/Outlook, not QQ Mail.' });
-    }
-
-    console.log(`[Outlook EWS Sync] Requesting sync for ${currentSettings.email} via Node.js EWS.`);
-
-    try {
-        // 2. 调用 Outlook EWS 同步函数 (传入 email, password, 和其他设置)
-        const ewsResult = await syncOutlookViaEWS(
-            currentSettings.email, 
-            currentSettings.password, 
-            currentSettings // Pass the whole settings object for ewsUrl, exchangeVersion etc.
-        );
-
-        // 3. 处理结果
-        if (ewsResult.success) {
-            console.log(`[Outlook EWS Sync] EWS sync successful. Found: ${ewsResult.itemCount}, Processed: ${ewsResult.events.length}`);
-             // TODO: 在这里添加将 ewsResult.events 合并/更新到 eventsDb 的逻辑
-             // 例如：
-             // if (ewsResult.events && Array.isArray(ewsResult.events)) {
-             //     const sourceId = `outlook_ews_js_sync_${currentSettings.email}`;
-             //     eventsDb = eventsDb.filter(event => event.source !== sourceId);
-             //     ewsResult.events.forEach(event => { eventsDb.push({ ...event, source: sourceId }); });
-             //     await saveEvents(eventsDb);
-             //     console.log(`[Outlook EWS Sync] Updated local events database. Total: ${eventsDb.length}`);
-             // }
-
-            res.status(200).json({
-                message: ewsResult.message,
-                data: {
-                    itemCount: ewsResult.itemCount,
-                    processedCount: ewsResult.events.length,
-                    events: ewsResult.events // 返回处理过的事件
-                }
-            });
-                        } else {
-            console.error(`[Outlook EWS Sync] EWS sync failed: ${ewsResult.message}`);
-                res.status(500).json({ 
-                error: `Outlook EWS sync failed: ${ewsResult.message}`,
-                details: ewsResult.error // 返回详细的错误信息
-            });
-        }
-
-    } catch (error) {
-        // 捕获 syncOutlookViaEWS 外部或未预料的错误
-        console.error('[Outlook EWS Sync Route] Unexpected error:', error);
-        res.status(500).json({ error: `Error during Outlook EWS sync route execution: ${error.message}` });
-    }
-});
+// --- IMAP同步路由 ---
 
 
 // --- 辅助函数：使用 LLM 解析文本 ---
@@ -1358,29 +1093,13 @@ app.post('/events', authenticateUser, async (req, res) => {
         // 加载用户的事件数据
         let userEvents = await loadEvents(userId);
         
-        // 检查冲突事件（除非强制创建）
+        // 注意：根据新的需求，冲突检测只在前端显示，不再阻止事件创建
+        // 如果需要日志记录，可以在这里检测冲突但不阻止创建
         if (!newEvent.force_create) {
             const conflictingEvents = findConflictingEvents(eventToSave, userEvents);
-            
-            // 如果存在冲突，返回冲突信息
             if (conflictingEvents.length > 0) {
-                console.log(`[用户 ${req.user.username}] 检测到时间冲突，冲突事件数量: ${conflictingEvents.length}`);
-                
-                // 返回冲突信息给前端
-                return res.status(409).json({
-                    error: 'schedule_conflict',
-                    message: `检测到时间冲突，与 ${conflictingEvents.length} 个现有事件存在重叠`,
-                    conflicts: conflictingEvents.map(event => ({
-                        id: event.id,
-                        title: event.title,
-                        start_datetime: event.start_datetime,
-                        end_datetime: event.end_datetime,
-                        description: event.description
-                    }))
-                });
+                console.log(`[用户 ${req.user.username}] 检测到时间冲突，冲突事件数量: ${conflictingEvents.length}，但继续创建事件`);
             }
-        } else {
-            console.log(`[用户 ${req.user.username}] 强制创建事件，跳过冲突检测`);
         }
         
         // 添加新事件
@@ -1518,29 +1237,14 @@ app.put('/events/:id', authenticateUser, async (req, res) => {
 
         console.log(`[PUT /events/:id] 准备更新事件对象:`, updatedEvent);
 
-        // 对于完整更新（涉及时间变更），检查冲突（除非强制更新）
+        // 注意：根据新的需求，冲突检测只在前端显示，不再阻止事件更新
+        // 如果需要日志记录，可以在这里检测冲突但不阻止更新
         if ((fieldKeys.length > 1 || (fieldKeys.length === 1 && fieldKeys[0] !== 'completed')) && !updatedFields.force_create) {
             // 检查更新后的事件是否与其他事件存在冲突
             const conflictingEvents = findConflictingEvents(updatedEvent, userEvents, eventId);
-            
             if (conflictingEvents.length > 0) {
-                console.log(`[用户 ${req.user.username}] 更新事件时检测到时间冲突，冲突事件数量: ${conflictingEvents.length}`);
-                
-                // 返回冲突信息给前端
-                return res.status(409).json({
-                    error: 'schedule_conflict',
-                    message: `更新事件时检测到时间冲突，与 ${conflictingEvents.length} 个现有事件存在重叠`,
-                    conflicts: conflictingEvents.map(event => ({
-                        id: event.id,
-                        title: event.title,
-                        start_datetime: event.start_datetime,
-                        end_datetime: event.end_datetime,
-                        description: event.description
-                    }))
-                });
+                console.log(`[用户 ${req.user.username}] 更新事件时检测到时间冲突，冲突事件数量: ${conflictingEvents.length}，但继续更新事件`);
             }
-        } else if (updatedFields.force_create) {
-            console.log(`[用户 ${req.user.username}] 强制更新事件，跳过冲突检测`);
         }
 
         // 更新用户事件数据

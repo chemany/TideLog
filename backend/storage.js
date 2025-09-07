@@ -396,40 +396,6 @@ function saveEvents(events, userId = null) {
 }
 
 /**
- * 加载用户的Exchange设置
- * @param {string} userId - 用户ID，如果为null则使用全局设置
- * @returns {Object} Exchange设置对象
- */
-function loadExchangeSettings(userId = null) {
-    const defaultSettings = {
-        email: "",
-        password: "",
-        serverUrl: ""
-    };
-    
-    if (userId) {
-        const userFilePath = getUserFilePath(userId, 'exchange_settings.json');
-        return loadJsonFile(userFilePath, defaultSettings);
-    } else {
-        return loadJsonFile(EXCHANGE_SETTINGS_FILE, defaultSettings);
-    }
-}
-
-/**
- * 保存用户的Exchange设置
- * @param {Object} settings - Exchange设置对象
- * @param {string} userId - 用户ID，如果为null则保存到全局设置
- */
-function saveExchangeSettings(settings, userId = null) {
-    if (userId) {
-        const userFilePath = getUserFilePath(userId, 'exchange_settings.json');
-        saveJsonFile(userFilePath, settings);
-    } else {
-        saveJsonFile(EXCHANGE_SETTINGS_FILE, settings);
-    }
-}
-
-/**
  * 加载用户的IMAP设置
  * @param {string} userId - 用户ID，如果为null则使用全局设置
  * @returns {Object} IMAP设置对象
@@ -796,8 +762,7 @@ function migrateGlobalSettingsToUser(userId) {
 module.exports = {
     loadLLMSettings, saveLLMSettings,
     loadEvents, saveEvents,
-    loadExchangeSettings, saveExchangeSettings,
-    loadImapSettings, saveImapSettings,
+          loadImapSettings, saveImapSettings,
     loadCalDAVSettings, saveCalDAVSettings,
     loadImapFilterSettings, saveImapFilterSettings,
     migrateGlobalEventsToUser,

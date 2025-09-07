@@ -117,40 +117,7 @@ class NewSettingsService {
         }
     }
 
-    /**
-     * 获取Exchange设置
-     */
-    async getExchangeSettings(userId, userInfo = null) {
-        try {
-            const settings = await userDataService.getUserSettingsByType(userId, 'exchange', userInfo);
-            console.log(`[NewSettingsService] 获取Exchange设置 - userId: ${userId}`, settings);
-            return settings;
-        } catch (error) {
-            console.error(`[NewSettingsService] 获取Exchange设置失败 - userId: ${userId}`, error);
-            return {
-                email: '',
-                password: '',
-                ewsUrl: '',
-                exchangeVersion: 'Exchange2013',
-                updated_at: new Date().toISOString()
-            };
-        }
-    }
-
-    /**
-     * 保存Exchange设置
-     */
-    async saveExchangeSettings(settings, userId) {
-        try {
-            await userDataService.saveUserSettingsByType(userId, 'exchange', settings);
-            console.log(`[NewSettingsService] 保存Exchange设置成功 - userId: ${userId}`);
-            return true;
-        } catch (error) {
-            console.error(`[NewSettingsService] 保存Exchange设置失败 - userId: ${userId}`, error);
-            return false;
-        }
-    }
-
+  
     /**
      * 获取IMAP过滤设置
      */
@@ -336,7 +303,6 @@ class NewSettingsService {
                 llm: await this.getLLMSettings(userId),
                 caldav: await this.getCalDAVSettings(userId),
                 imap: await this.getImapSettings(userId),
-                exchange: await this.getExchangeSettings(userId),
                 imap_filter: await this.getImapFilterSettings(userId)
             };
         } catch (error) {
