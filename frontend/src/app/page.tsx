@@ -452,6 +452,22 @@ export default function CalendarPage() {
   }, []);
 
   /**
+   * 检查事件冲突的辅助函数
+   */
+  const findConflictingEvents = useCallback((newEvent: MyCalendarEvent, existingEvents: MyCalendarEvent[]) => {
+    const newStart = newEvent.start;
+    const newEnd = newEvent.end;
+    
+    return existingEvents.filter(event => {
+      // 跳过已完成的事件
+      if (event.completed) return false;
+      
+      // 检查时间重叠：新事件开始时间 < 现有事件结束时间 且 新事件结束时间 > 现有事件开始时间
+      return newStart < event.end && newEnd > event.start;
+    });
+  }, []);
+
+  /**
    * 处理自然语言输入并尝试解析和创建事件
    */
   const handleSubmit = useCallback(async () => {
@@ -483,7 +499,7 @@ export default function CalendarPage() {
             return;
         }
 
-        // 将解析的数据转换为事件格式并填充到编辑界面
+        // 将解析的数据转换为事件格式
         const parsedEvent: MyCalendarEvent = {
             title: parsedData.title || '未命名事件',
             start: new Date(parsedData.start_datetime),
@@ -494,15 +510,61 @@ export default function CalendarPage() {
             location: parsedData.location,
         };
 
-        // 设置解析后的事件数据并直接打开创建界面
-        setSelectedEvent(parsedEvent);
-        setSelectedSlot(null);
-        setShowCreateModal(true);
-        toast.success('解析成功！请确认事件信息', { id: toastId });
+        // 检查时间冲突
+        const conflictingEvents = findConflictingEvents(parsedEvent, events);
         
-        // 清空智能输入框并关闭智能创建的浮动模态框
-        setNaturalLanguageInput('');
-        setShowSmartCreateModal(false);
+        if (conflictingEvents.length > 0) {
+            // 有冲突，显示冲突信息并让用户手动确认
+            const conflictNames = conflictingEvents.map(e => e.title).join('、');
+            toast.dismiss(toastId);
+            toast.error(`检测到时间冲突：${conflictNames}`, { duration: 4000 });
+            
+            // 设置解析后的事件数据并打开创建界面让用户确认
+            setSelectedEvent(parsedEvent);
+            setSelectedSlot(null);
+            setShowCreateModal(true);
+            
+            // 清空智能输入框并关闭智能创建的浮动模态框
+            setNaturalLanguageInput('');
+            setShowSmartCreateModal(false);
+        } else {
+            // 没有冲突，自动创建事件
+            toast.loading('正在创建事件...', { id: toastId });
+            
+            try {
+                // 准备事件数据用于保存
+                const eventToSave = {
+                    title: parsedEvent.title,
+                    start: parsedEvent.start,
+                    end: parsedEvent.end,
+                    allDay: parsedEvent.allDay,
+                    description: parsedEvent.description,
+                    location: parsedEvent.location,
+                    completed: parsedEvent.completed
+                };
+                
+                // 调用保存事件的函数
+                await handleSaveEventFromModal(eventToSave);
+                
+                // 清空智能输入框并关闭智能创建的浮动模态框
+                setNaturalLanguageInput('');
+                setShowSmartCreateModal(false);
+                
+                toast.success('智能创建成功！', { id: toastId });
+            } catch (saveError) {
+                console.error('自动保存事件失败:', saveError);
+                toast.error(`保存事件失败: ${saveError instanceof Error ? saveError.message : '未知错误'}`, { id: toastId });
+                
+                // 保存失败时，仍然打开编辑界面让用户手动处理
+                setSelectedEvent(parsedEvent);
+                setSelectedSlot(null);
+                setShowCreateModal(true);
+                
+                // 清空智能输入框并关闭智能创建的浮动模态框
+                setNaturalLanguageInput('');
+                setShowSmartCreateModal(false);
+            }
+        }
 
     } catch (error) {
         console.error("Error in natural language submission flow:", error);
@@ -510,7 +572,7 @@ export default function CalendarPage() {
     } finally {
       setIsParsing(false);
     }
-  }, [naturalLanguageInput]); // 移除events依赖
+  }, [naturalLanguageInput, events, findConflictingEvents, handleSaveEventFromModal]); // 添加必要的依赖
 
   // 优化文件输入点击处理
   const handleDocImportClick = useCallback(() => {

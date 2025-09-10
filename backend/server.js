@@ -892,7 +892,15 @@ JSON 对象结果：
 
         // 7. 解析并验证 LLM 响应
         try {
-            const parsedResult = JSON.parse(llmResponseContent);
+            let jsonToParse = llmResponseContent;
+            
+            // 尝试修复被截断的JSON
+            if (!llmResponseContent.trim().endsWith('}')) {
+                console.log("[LLM Parse Util] 检测到JSON可能被截断，尝试修复...");
+                jsonToParse = llmResponseContent.trim() + '}';
+            }
+            
+            const parsedResult = JSON.parse(jsonToParse);
             
             if (!parsedResult || typeof parsedResult !== 'object') {
                 throw new Error('LLM 返回的不是有效的 JSON 对象');
@@ -923,7 +931,46 @@ JSON 对象结果：
 
         } catch (parseError) {
             console.error("[LLM Parse Util] JSON解析失败:", parseError);
-            return null;
+            console.log("[LLM Parse Util] 原始响应内容:", llmResponseContent);
+            
+            // 尝试更激进的JSON修复
+            try {
+                console.log("[LLM Parse Util] 尝试更激进的JSON修复...");
+                
+                // 移除可能的markdown代码块标记
+                let cleanedResponse = llmResponseContent
+                    .replace(/```json\s*/g, '')
+                    .replace(/```\s*/g, '')
+                    .trim();
+                
+                // 如果不是以{开头，尝试找到第一个{
+                const firstBrace = cleanedResponse.indexOf('{');
+                if (firstBrace > 0) {
+                    cleanedResponse = cleanedResponse.substring(firstBrace);
+                }
+                
+                // 如果不是以}结尾，添加}
+                if (!cleanedResponse.endsWith('}')) {
+                    cleanedResponse += '}';
+                }
+                
+                const fallbackResult = JSON.parse(cleanedResponse);
+                
+                const result = {
+                    title: fallbackResult.title || null,
+                    start_datetime: fallbackResult.start_datetime || null,
+                    end_datetime: fallbackResult.end_datetime || null,
+                    description: fallbackResult.description || null,
+                    location: fallbackResult.location || null
+                };
+                
+                console.log("[LLM Parse Util] JSON修复成功:", result);
+                return result;
+                
+            } catch (fallbackError) {
+                console.error("[LLM Parse Util] JSON修复也失败:", fallbackError);
+                return null;
+            }
         }
 
     } catch (error) {
