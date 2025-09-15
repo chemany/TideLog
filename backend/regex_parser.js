@@ -42,24 +42,82 @@ function parseDateString(dateStr) {
       let isAllDay = false;
   
       try {
-          // 改进的正则表达式
+                  // 增强的正则表达式系统
           const dateRegex = /(\d{4}[-/年]\s?\d{1,2}[-/月]\s?\d{1,2})日?/g; 
-          const timeRegex = /(\d{1,2}\s?[:：]\s?\d{2})\s?([APap][Mm])?/g; 
+          const timeRegex = /(\d{1,2})\s?[:：]\s?(\d{2})\s?([APap][Mm])?/g; 
+          const timeRangeRegex = /(\d{1,2})\s?[:：]\s?(\d{2})\s*[-—～至]\s*(\d{1,2})\s?[:：]\s?(\d{2})/g;
           
-          // 新增：相对时间正则表达式
+          // 相对时间正则表达式（增强版）
           const relativeDateRegex = /(今天|今日|明天|明日|后天|昨天|昨日)/g;
-          const relativeTimeRegex = /(上午|下午|早上|早晨|中午|晚上|傍晚|晚间)/g;
-          const weekdayRegex = /(周一|周二|周三|周四|周五|周六|周日|星期一|星期二|星期三|星期四|星期五|星期六|星期日)/g;
+          const relativeTimeRegex = /(上午|下午|早上|早晨|中午|晚上|傍晚|晚间|凌晨|半夜|深夜)/g;
+          const timePointRegex = /(凌晨|半夜|深夜|早上|早晨|上午|中午|下午|傍晚|晚上|晚间|深夜)/g;
+          const simpleTimeRegex = /(\d{1,2})\s?(点|时)/g;
+          const halfTimeRegex = /(\d{1,2})\s?(点半|半)/g;
+          const weekdayRegex = /(周一|周二|周三|周四|周五|周六|周日|星期一|星期二|星期三|星期四|星期五|星期六|星期日|周[一二三四五六日])/g;
+          
+          // 特殊模式："本13:30"表示今天13:30
+          const todayTimeRegex = /[本今](\d{1,2})\s?[:：]\s?(\d{2})/g;
   
           const dateMatches = [...text.matchAll(dateRegex)];
           const timeMatches = [...text.matchAll(timeRegex)];
+          const timeRangeMatches = [...text.matchAll(timeRangeRegex)];
           const relativeDateMatches = [...text.matchAll(relativeDateRegex)];
           const relativeTimeMatches = [...text.matchAll(relativeTimeRegex)];
+          const timePointMatches = [...text.matchAll(timePointRegex)];
+          const simpleTimeMatches = [...text.matchAll(simpleTimeRegex)];
+          const halfTimeMatches = [...text.matchAll(halfTimeRegex)];
           const weekdayMatches = [...text.matchAll(weekdayRegex)];
+          const todayTimeMatches = [...text.matchAll(todayTimeRegex)];
           
           let extractedTitlePart = text; // 用于尝试提取标题
   
-          if (dateMatches.length > 0) {
+          // 优先处理特殊模式："本13:30"表示今天13:30
+          if (todayTimeMatches.length > 0) {
+              console.log("[Regex Parse] 检测到今天时间模式:", todayTimeMatches[0]);
+              startDate = new Date();
+              const hours = parseInt(todayTimeMatches[0][1]);
+              const minutes = parseInt(todayTimeMatches[0][2]);
+              
+              if (!isNaN(hours) && !isNaN(minutes)) {
+                  // 特殊处理"下午1点半"等情况
+                  let finalHours = hours;
+                  if (text.includes('下午') && hours < 12) finalHours += 12;
+                  if (text.includes('上午') && hours === 12) finalHours = 0;
+                  
+                  startDate.setHours(finalHours, minutes, 0, 0);
+                  endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+                  
+                  // 检查是否有时间范围
+                  if (timeRangeMatches.length > 0) {
+                      const rangeMatch = timeRangeMatches[0];
+                      const startHours = parseInt(rangeMatch[1]);
+                      const startMinutes = parseInt(rangeMatch[2]);
+                      const endHours = parseInt(rangeMatch[3]);
+                      const endMinutes = parseInt(rangeMatch[4]);
+                      
+                      if (!isNaN(startHours) && !isNaN(startMinutes) && !isNaN(endHours) && !isNaN(endMinutes)) {
+                          let adjustedStartHours = startHours;
+                          let adjustedEndHours = endHours;
+                          
+                          if (text.includes('下午')) {
+                              if (startHours < 12) adjustedStartHours += 12;
+                              if (endHours < 12) adjustedEndHours += 12;
+                          }
+                          if (text.includes('上午')) {
+                              if (startHours === 12) adjustedStartHours = 0;
+                              if (endHours === 12) adjustedEndHours = 0;
+                          }
+                          
+                          startDate.setHours(adjustedStartHours, startMinutes, 0, 0);
+                          endDate.setHours(adjustedEndHours, endMinutes, 0, 0);
+                      }
+                  }
+                  
+                  console.log(`[Regex Parse] 今天时间解析成功: ${startDate.toISOString()}`);
+              }
+          }
+          // 处理明确日期
+          else if (dateMatches.length > 0) {
               const parsedDate = parseDateString(dateMatches[0][1]); 
               if (parsedDate) {
                    startDate = parsedDate;

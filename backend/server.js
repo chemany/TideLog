@@ -38,7 +38,7 @@ const multer = require('multer');
 const upload = multer(); // 初始化 multer，用于处理文件上传
 const mammoth = require("mammoth");
 const OpenAI = require("openai"); // <-- Import OpenAI library
-const { parse: parseByRegex } = require('./regex_parser'); // 假设正则解析器在单独文件中
+const { parse: parseByRegex } = require('./regex_parser_enhanced'); // 使用增强版正则解析器
 const cron = require('node-cron'); // <-- 引入 node-cron
 const { createDAVClient, DAVClient } = require('tsdav');
 const ical = require('node-ical');
@@ -796,64 +796,78 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
         const absOffsetHours = Math.abs(offsetHours);
         const offsetString = `${sign}${String(Math.floor(absOffsetHours)).padStart(2, '0')}:${String((absOffsetHours % 1) * 60).padStart(2, '0')}`;
         
+        // 获取当前日期的精确信息
+        const currentDate = new Date();
+        const currentDateString = currentDate.toISOString().split('T')[0]; // YYYY-MM-DD格式
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth() + 1;
+        const currentDay = currentDate.getDate();
+        const currentWeekday = ['日', '一', '二', '三', '四', '五', '六'][currentDate.getDay()];
+        
         const prompt = `
-请解析以下自然语言描述，提取出日历事件的关键信息。
+请精确解析以下自然语言描述，提取日历事件信息。
 
-**重要上下文:**
-- **当前日期:** ${new Date().toLocaleDateString('zh-CN')}
+**关键上下文:**
+- **当前日期:** ${currentDateString} (星期${currentWeekday})
 - **用户时区:** UTC${offsetString}
+- **年份:** ${currentYear}年
 
-**输出要求:**
-请将识别出的本地时间点准确转换为 UTC 时间，然后将结果格式化为 JSON 对象，包含以下键：
-- "title": string (事件标题，尽量简洁明了)
-- "start_datetime": string (转换后的 UTC 时间，ISO 8601 格式，如 "2025-01-15T07:00:00.000Z")
-- "end_datetime": string | null (转换后的 UTC 时间，如果未指定则推断默认时长1小时)
-- "description": string | null (事件详细描述)
-- "location": string | null (事件地点)
-时间解析规则：
-    1. 日期和时间必须严格按照 ISO 8601 格式 (YYYY-MM-DDTHH:mm:ss.SSSZ)
-    2. 时区处理：
-        - 所有时间都应转换为 UTC 时间
-        - "早上8点" = 08:00 本地时间 → 转换为 UTC
-        - "晚上10点" = 22:00 本地时间 → 转换为 UTC
-     3. 相对时间解析：
-        - "明天" = 今天日期 + 1天
-        - "后天" = 今天日期 + 2天
-       - "昨天" = 今天日期 - 1天
-    4. 时间点映射：
-       - "凌晨" = 00:00-05:59
-       - "早上/上午" = 06:00-11:59
-       - "中午" = 12:00
-       - "下午" = 13:00-17:59
-       - "晚上" = 18:00-23:59
-    5. 特殊时间点：
-       - "午夜" = 00:00
-       - "正午/中午" = 12:00
-    验证步骤：
-    1. 确认用户表达的意图时间
-    2. 将意图时间转换为本地时间
-    3. 将本地时间转换为 UTC 时间
-    4. 检查转换结果是否符合用户意图
-    示例：
-    用户输入："明天早上8点起床"
-      正确解析：今天是2025-08-11，明天是2025-08-12，早上8点是08:00
-    假设本地时区为UTC+8，则UTC时间为2025-08-12T00:00:00.000Z
-    用户输入："明天晚上十点睡觉"
-     正确解析：今天是2025-08-11，明天是2025-08-12，晚上十点是22:00
-     假设本地时区为UTC+8，则UTC时间为2025-08-12T14:00:00.000Z
+**精确时间解析规则:**
+1. **相对日期识别:**
+   - "今天" = ${currentDateString}
+   - "明天" = ${new Date(currentDate.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+   - "后天" = ${new Date(currentDate.getTime() + 48 * 60 * 60 * 1000).toISOString().split('T')[0]}
+   - "昨天" = ${new Date(currentDate.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+   - "本周五/下周一" = 根据当前日期计算具体日期
+   - "本13:30" = 今天的13:30，不是"本周五"
+
+2. **时间点精确映射:**
+   - "凌晨" = 00:00-05:59
+   - "早上/上午" = 06:00-11:59
+   - "中午" = 12:00-12:59  
+   - "下午" = 13:00-17:59
+   - "晚上" = 18:00-23:59
+   - "半夜" = 23:00-01:00
+
+3. **具体时间解析:**
+   - "1点半/一点半" = 13:30 (下午) 或 01:30 (凌晨，需根据上下文)
+   - "下午1点半" = 13:30
+   - "14:00/两点" = 14:00
+   - "18:30/六点半" = 18:30
+
+4. **时长推断:**
+   - 会议通常1-2小时
+   - "13:30-16:30" = 3小时
+   - 未指定时长时默认1小时
+
+5. **时区转换:**
+   - 本地时间 → UTC时间转换公式: UTC = 本地时间 - 时区偏移
+   - 例如: 北京时间14:00 (UTC+8) = UTC 06:00
+
+**输出格式要求:**
+严格按照以下JSON格式输出，确保时间准确性：
+{
+  "title": "简洁的事件标题",
+  "start_datetime": "YYYY-MM-DDTHH:mm:ss.SSSZ",
+  "end_datetime": "YYYY-MM-DDTHH:mm:ss.SSSZ", 
+  "description": "详细描述",
+  "location": "地点"
+}
+
+**验证示例:**
+- "今天下午1点半开会" → start_datetime: "${currentDateString}T13:30:00+08:00" → UTC: "${currentDateString}T05:30:00.000Z"
+- "13:30-16:30开会" → start_datetime: "${currentDateString}T13:30:00+08:00", end_datetime: "${currentDateString}T16:30:00+08:00"
+
 **强制要求:**
-1. 请 **严格** 只返回一个有效的 JSON 对象，不要包含任何额外的文本、解释、注释或格式化。
-2. 不要使用 Markdown 代码块格式（如 \`\`\`json）包裹结果。
-3. 不要在 JSON 对象前后添加任何说明文字。
-4. 确保返回的 JSON 对象是完整且语法正确的。
+1. 只返回JSON对象，无任何额外文字
+2. 确保JSON格式完整正确
+3. 时间必须准确转换为UTC
+4. 无法解析时间时start_datetime设为null
 
-**特殊情况:**
-如果无法从文本中解析出有效的日期和时间，请确保 "start_datetime" 的值为 null。
-
-自然语言文本：
+待解析文本:
 "${text}"
 
-JSON 对象结果：
+JSON结果:
 `;
         
         // 6. 调用 LLM API
@@ -864,10 +878,10 @@ JSON 对象结果：
             const completionParams = {
                 model: modelToUse,
                 messages: [
-                    { role: "system", content: "你是一个精确的自然语言理解助手，专门用于将用户输入的描述转换为结构化的日历事件 JSON 对象。你的任务是严格遵守以下规则：1. 只输出一个有效的 JSON 对象，不包含任何额外的文本、解释或格式化；2. 不要使用 Markdown 代码块格式；3. 确保 JSON 对象语法正确且完整；4. 严格按照指定的字段格式输出。" },
+                    { role: "system", content: "你是专业的日历事件解析AI助手。严格遵守指令：1. 只输出完整JSON对象；2. 不包含任何额外文字、解释或格式化；3. 确保JSON语法完美；4. 时间转换必须准确；5. 优先处理中文时间表达习惯。特别注意：'本13:30'指今天13:30，不是本周五；'下午1点半'=13:30；'1-4点'表示持续时间。" },
                     { role: "user", content: prompt }
                 ],
-                temperature: 0.2,
+                temperature: 0.1,
                 max_tokens: currentLlmSettings.max_tokens || 2000
             };
             
@@ -890,93 +904,291 @@ JSON 对象结果：
             return null;
         }
 
-        // 7. 解析并验证 LLM 响应
-        try {
-            let jsonToParse = llmResponseContent;
+        // 7. 解析并验证 LLM 响应 - 增强版JSON修复机制
+        let parsedResult = null;
+        let jsonParseAttempts = [];
+        
+        // 尝试多种JSON修复策略
+        const repairStrategies = [
+            // 策略1: 原始内容直接解析
+            () => llmResponseContent,
             
-            // 尝试修复被截断的JSON
-            if (!llmResponseContent.trim().endsWith('}')) {
-                console.log("[LLM Parse Util] 检测到JSON可能被截断，尝试修复...");
-                jsonToParse = llmResponseContent.trim() + '}';
-            }
+            // 策略2: 修复截断的JSON（缺少结尾括号）
+            () => {
+                if (!llmResponseContent.trim().endsWith('}')) {
+                    console.log("[LLM Parse Util] 策略2: 修复截断JSON");
+                    return llmResponseContent.trim() + '}';
+                }
+                return null;
+            },
             
-            const parsedResult = JSON.parse(jsonToParse);
-            
-            if (!parsedResult || typeof parsedResult !== 'object') {
-                throw new Error('LLM 返回的不是有效的 JSON 对象');
-            }
-            
-            // 验证并清理数据
-            const result = {
-                title: parsedResult.title && typeof parsedResult.title === 'string' ? parsedResult.title : null,
-                start_datetime: parsedResult.start_datetime && typeof parsedResult.start_datetime === 'string' ? parsedResult.start_datetime : null,
-                end_datetime: parsedResult.end_datetime && typeof parsedResult.end_datetime === 'string' ? parsedResult.end_datetime : null,
-                description: parsedResult.description && typeof parsedResult.description === 'string' ? parsedResult.description : null,
-                location: parsedResult.location && typeof parsedResult.location === 'string' ? parsedResult.location : null
-            };
-            
-            // 验证时间格式
-            if (result.start_datetime && isNaN(new Date(result.start_datetime).getTime())) {
-                console.warn("[LLM Parse Util] 无效的开始时间格式:", result.start_datetime);
-                result.start_datetime = null;
-            }
-            
-            if (result.end_datetime && isNaN(new Date(result.end_datetime).getTime())) {
-                console.warn("[LLM Parse Util] 无效的结束时间格式:", result.end_datetime);
-                result.end_datetime = null;
-            }
-            
-            console.log("[LLM Parse Util] 解析成功:", result);
-            return result;
-
-        } catch (parseError) {
-            console.error("[LLM Parse Util] JSON解析失败:", parseError);
-            console.log("[LLM Parse Util] 原始响应内容:", llmResponseContent);
-            
-            // 尝试更激进的JSON修复
-            try {
-                console.log("[LLM Parse Util] 尝试更激进的JSON修复...");
-                
-                // 移除可能的markdown代码块标记
-                let cleanedResponse = llmResponseContent
+            // 策略3: 移除markdown代码块
+            () => {
+                console.log("[LLM Parse Util] 策略3: 清理markdown格式");
+                let cleaned = llmResponseContent
                     .replace(/```json\s*/g, '')
                     .replace(/```\s*/g, '')
                     .trim();
                 
-                // 如果不是以{开头，尝试找到第一个{
-                const firstBrace = cleanedResponse.indexOf('{');
+                // 找到JSON开始位置
+                const firstBrace = cleaned.indexOf('{');
                 if (firstBrace > 0) {
-                    cleanedResponse = cleanedResponse.substring(firstBrace);
+                    cleaned = cleaned.substring(firstBrace);
                 }
                 
-                // 如果不是以}结尾，添加}
-                if (!cleanedResponse.endsWith('}')) {
-                    cleanedResponse += '}';
+                // 确保以}结尾
+                if (!cleaned.endsWith('}')) {
+                    cleaned += '}';
                 }
                 
-                const fallbackResult = JSON.parse(cleanedResponse);
+                return cleaned;
+            },
+            
+            // 策略4: 提取JSON对象（处理前后有文字的情况）
+            () => {
+                console.log("[LLM Parse Util] 策略4: 提取JSON对象");
+                const jsonMatch = llmResponseContent.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    return jsonMatch[0];
+                }
+                return null;
+            },
+            
+            // 策略5: 修复缺少引号的键名
+            () => {
+                console.log("[LLM Parse Util] 策略5: 修复JSON键名引号");
+                let repaired = llmResponseContent;
+                // 修复类似 {title: "会议"} 的情况
+                repaired = repaired.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
                 
-                const result = {
-                    title: fallbackResult.title || null,
-                    start_datetime: fallbackResult.start_datetime || null,
-                    end_datetime: fallbackResult.end_datetime || null,
-                    description: fallbackResult.description || null,
-                    location: fallbackResult.location || null
-                };
+                // 确保以{开头和}结尾
+                if (!repaired.trim().startsWith('{')) {
+                    repaired = '{' + repaired.trim();
+                }
+                if (!repaired.trim().endsWith('}')) {
+                    repaired = repaired.trim() + '}';
+                }
                 
-                console.log("[LLM Parse Util] JSON修复成功:", result);
-                return result;
+                return repaired;
+            },
+            
+            // 策略6: 智能补全JSON结构
+            () => {
+                console.log("[LLM Parse Util] 策略6: 智能补全JSON");
+                let content = llmResponseContent.trim();
                 
-            } catch (fallbackError) {
-                console.error("[LLM Parse Util] JSON修复也失败:", fallbackError);
+                // 移除所有非JSON内容
+                if (!content.startsWith('{')) {
+                    const braceIndex = content.indexOf('{');
+                    if (braceIndex > 0) {
+                        content = content.substring(braceIndex);
+                    }
+                }
+                
+                // 分析JSON结构并补全
+                const openBraces = (content.match(/\{/g) || []).length;
+                const closeBraces = (content.match(/\}/g) || []).length;
+                const missingBraces = openBraces - closeBraces;
+                
+                if (missingBraces > 0) {
+                    content += '}'.repeat(missingBraces);
+                }
+                
+                return content;
+            }
+        ];
+        
+        // 依次尝试各种修复策略
+        for (let i = 0; i < repairStrategies.length; i++) {
+            try {
+                const repairedJson = repairStrategies[i]();
+                if (repairedJson) {
+                    jsonParseAttempts.push(`策略${i + 1}: ${repairedJson.substring(0, 100)}...`);
+                    parsedResult = JSON.parse(repairedJson);
+                    console.log(`[LLM Parse Util] 策略${i + 1}修复成功`);
+                    break;
+                }
+            } catch (strategyError) {
+                console.log(`[LLM Parse Util] 策略${i + 1}失败:`, strategyError.message);
+            }
+        }
+        
+        // 如果所有策略都失败，记录尝试过程
+        if (!parsedResult) {
+            console.error("[LLM Parse Util] 所有JSON修复策略失败");
+            console.log("[LLM Parse Util] 修复尝试记录:", jsonParseAttempts);
+            throw new Error('无法解析LLM返回的JSON内容');
+        }
+            
+        // 验证解析结果
+        if (!parsedResult || typeof parsedResult !== 'object') {
+            throw new Error('LLM 返回的不是有效的 JSON 对象');
+        }
+        
+        // 验证并清理数据
+        const result = {
+            title: parsedResult.title && typeof parsedResult.title === 'string' ? parsedResult.title.trim() : null,
+            start_datetime: parsedResult.start_datetime && typeof parsedResult.start_datetime === 'string' ? parsedResult.start_datetime.trim() : null,
+            end_datetime: parsedResult.end_datetime && typeof parsedResult.end_datetime === 'string' ? parsedResult.end_datetime.trim() : null,
+            description: parsedResult.description && typeof parsedResult.description === 'string' ? parsedResult.description.trim() : null,
+            location: parsedResult.location && typeof parsedResult.location === 'string' ? parsedResult.location.trim() : null
+        };
+        
+        // 增强的时间格式验证和修复
+        if (result.start_datetime) {
+            // 尝试修复各种时间格式并确保UTC转换
+            const fixedStartTime = fixDateTimeFormat(result.start_datetime);
+            if (fixedStartTime) {
+                result.start_datetime = fixedStartTime;
+                console.log("[LLM Parse Util] 开始时间修复成功:", fixedStartTime);
+            } else {
+                console.warn("[LLM Parse Util] 无法修复的开始时间格式:", result.start_datetime);
+                result.start_datetime = null;
+            }
+        }
+        
+        if (result.end_datetime) {
+            const fixedEndTime = fixDateTimeFormat(result.end_datetime);
+            if (fixedEndTime) {
+                result.end_datetime = fixedEndTime;
+                console.log("[LLM Parse Util] 结束时间修复成功:", fixedEndTime);
+            } else {
+                console.warn("[LLM Parse Util] 无法修复的结束时间格式:", result.end_datetime);
+                result.end_datetime = null;
+            }
+        }
+        
+        // 智能推断结束时间
+        if (result.start_datetime && !result.end_datetime) {
+            const startDate = new Date(result.start_datetime);
+            let durationMs = 60 * 60 * 1000; // 默认1小时
+            
+            // 根据标题智能推断时长
+            if (result.title) {
+                const titleLower = result.title.toLowerCase();
+                if (titleLower.includes('会议') || titleLower.includes('开会')) {
+                    durationMs = 60 * 60 * 1000; // 会议默认1小时
+                } else if (titleLower.includes('培训') || titleLower.includes('课程')) {
+                    durationMs = 2 * 60 * 60 * 1000; // 培训默认2小时
+                } else if (titleLower.includes('讨论') || titleLower.includes('研讨')) {
+                    durationMs = 90 * 60 * 1000; // 讨论默认1.5小时
+                } else if (titleLower.includes('午餐') || titleLower.includes('晚餐')) {
+                    durationMs = 60 * 60 * 1000; // 用餐默认1小时
+                }
+            }
+            
+            result.end_datetime = new Date(startDate.getTime() + durationMs).toISOString();
+            console.log(`[LLM Parse Util] 智能推断结束时间 (+${durationMs/60000}分钟):`, result.end_datetime);
+        }
+        
+        // 验证时间逻辑关系
+        if (result.start_datetime && result.end_datetime) {
+            const startDate = new Date(result.start_datetime);
+            const endDate = new Date(result.end_datetime);
+            
+            if (endDate <= startDate) {
+                console.warn("[LLM Parse Util] 结束时间早于开始时间，自动调整");
+                result.end_datetime = new Date(startDate.getTime() + 60 * 60 * 1000).toISOString();
+            }
+        }
+        
+        console.log("[LLM Parse Util] 解析成功:", result);
+        return result;
+
+        } catch (parseError) {
+            console.error("[LLM Parse Util] JSON解析失败:", parseError);
+            console.log("[LLM Parse Util] 原始响应内容:", llmResponseContent);
+            return null; // 返回null让调用者处理fallback
+        }
+
+        // 辅助函数：修复时间格式和时区转换
+        function fixDateTimeFormat(datetimeStr) {
+            if (!datetimeStr) return null;
+            
+            try {
+                // 如果已经是有效的ISO格式，直接返回
+                if (!isNaN(new Date(datetimeStr).getTime())) {
+                    const date = new Date(datetimeStr);
+                    // 确保是UTC时间
+                    return date.toISOString();
+                }
+                
+                // 尝试修复常见格式问题
+                let fixed = datetimeStr.trim();
+                
+                // 1. 处理带时区的时间格式 (如 2025-09-12T13:30:00+08:00)
+                if (fixed.includes('+') || fixed.includes('-')) {
+                    // 这种格式已经是完整的，直接尝试解析
+                    if (!isNaN(new Date(fixed).getTime())) {
+                        return new Date(fixed).toISOString();
+                    }
+                    
+                    // 修复时区格式：将 +0800 转换为 +08:00
+                    if (fixed.includes('+') && !fixed.includes(':') && fixed.length > 19) {
+                        fixed = fixed.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+                    }
+                }
+                // 2. 处理没有时区的时间格式
+                else if (!fixed.includes('Z')) {
+                    // 如果是本地时间格式，需要转换为UTC
+                    const localDate = new Date(fixed);
+                    if (!isNaN(localDate.getTime())) {
+                        // 本地时间已经正确解析，直接返回ISO格式
+                        return localDate.toISOString();
+                    }
+                    
+                    // 修复不完整的格式
+                    if (fixed.length === 16) { // YYYY-MM-DDTHH:mm
+                        fixed += ':00';
+                    }
+                    if (fixed.length === 19) { // YYYY-MM-DDTHH:mm:ss
+                        fixed += '.000';
+                    }
+                    
+                    // 添加UTC标记
+                    if (!fixed.includes('Z') && !fixed.includes('+') && !fixed.includes('-')) {
+                        // 假设是本地时间，让JavaScript自动处理时区转换
+                        const localDate = new Date(fixed);
+                        if (!isNaN(localDate.getTime())) {
+                            return localDate.toISOString();
+                        }
+                    }
+                }
+                
+                // 最后尝试：直接解析并返回
+                if (!isNaN(new Date(fixed).getTime())) {
+                    return new Date(fixed).toISOString();
+                }
+                
+                return null;
+            } catch (error) {
+                console.warn("[fixDateTimeFormat] 修复时间格式失败:", error.message);
+                return null;
+            }
+        }
+        
+        // 辅助函数：确保时间是UTC格式
+        function ensureUTCTime(dateOrString) {
+            if (!dateOrString) return null;
+            
+            try {
+                let date;
+                if (typeof dateOrString === 'string') {
+                    date = new Date(dateOrString);
+                } else {
+                    date = dateOrString;
+                }
+                
+                if (isNaN(date.getTime())) {
+                    return null;
+                }
+                
+                return date.toISOString();
+            } catch (error) {
                 return null;
             }
         }
 
-    } catch (error) {
-        console.error('[LLM Parse Util] 意外错误:', error);
-        return null;
-    }
 }
 
 // ===== 日程冲突检测工具函数 =====
