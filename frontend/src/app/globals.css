@@ -30,12 +30,9 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
+  background: linear-gradient(to bottom,
       transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+      rgb(var(--background-end-rgb))) rgb(var(--background-start-rgb));
 }
 
 @tailwind base;
@@ -43,6 +40,7 @@ body {
 @tailwind utilities;
 
 @layer components {
+
   /* 定义统一按钮风格 */
   .unified-button {
     @apply px-2 py-1 bg-gray-100 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
@@ -53,40 +51,47 @@ body {
     /* 直接应用 .unified-button 的功能类，而不是使用 @apply */
     @apply px-2 py-1 bg-gray-100 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
     /* 保留其他必要的覆盖 */
-    color: inherit; 
+    color: inherit;
     background-image: none;
-    text-transform: none; 
+    text-transform: none;
     letter-spacing: normal;
     cursor: pointer;
   }
 
   /* 对按钮组（如视图切换）进行微调 */
   .rbc-btn-group button {
-      /* 移除统一按钮可能带来的独立阴影，并调整边框 */
-      @apply shadow-none border-l-0 first:border-l;
-      /* 确保圆角只在按钮组的两端 */
-      @apply rounded-none first:rounded-l-md last:rounded-r-md;
+    /* 移除统一按钮可能带来的独立阴影，并调整边框 */
+    @apply shadow-none border-l-0 first:border-l;
+    /* 确保圆角只在按钮组的两端 */
+    @apply rounded-none first:rounded-l-md last:rounded-r-md;
   }
-  
+
   /* 确保按钮组之间以及和标签之间有间距 */
   .rbc-toolbar {
-      @apply gap-2;
+    @apply gap-2;
   }
+
   .rbc-btn-group {
-      @apply flex;
+    @apply flex;
   }
+
   .rbc-toolbar .rbc-toolbar-label {
-       @apply text-xl font-semibold flex-shrink-0; /* 调整日期标签样式并防止其被压缩 */
-       margin-left: auto; /* 将标签推到右侧 (如果需要) */
-       margin-right: auto; /* 居中 */
+    @apply text-xl font-semibold flex-shrink-0;
+    /* 调整日期标签样式并防止其被压缩 */
+    margin-left: auto;
+    /* 将标签推到右侧 (如果需要) */
+    margin-right: auto;
+    /* 居中 */
   }
 
   /* 如果需要，覆盖掉默认的 focus 边框，因为 unified-button 已经处理了 focus */
   .rbc-toolbar button:focus {
-       outline: none;
-       box-shadow: none; /* 移除默认的 focus shadow，依赖 unified-button 的 ring */
+    outline: none;
+    box-shadow: none;
+    /* 移除默认的 focus shadow，依赖 unified-button 的 ring */
   }
-   /* 特定处理激活状态按钮 */
+
+  /* 特定处理激活状态按钮 */
   .rbc-toolbar button.rbc-active {
     @apply bg-gray-300 shadow-inner;
   }
@@ -100,9 +105,9 @@ body {
 .rbc-week-view,
 .rbc-day-view,
 .rbc-agenda-view {
-    display: flex !important;
-    flex-direction: column !important;
-    flex: 1 1 0% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 0% !important;
 }
 
 /* Remove all other overrides added previously */
@@ -110,17 +115,21 @@ body {
 
 /* 为 react-big-calendar 添加基础样式，防止 Tooltip 出现在日历下方 */
 .rbc-calendar {
-  position: relative; /* 确保日历容器是定位上下文 */
-  z-index: 0; /* 可以设置一个较低的 z-index */
+  position: relative;
+  /* 确保日历容器是定位上下文 */
+  z-index: 0;
+  /* 可以设置一个较低的 z-index */
 }
 
 .rbc-event {
-  z-index: 1; /* 事件的 z-index 应高于日历背景但低于模态框 */
+  z-index: 1;
+  /* 事件的 z-index 应高于日历背景但低于模态框 */
   /* 其他 rbc-event 样式 */
 }
 
 .rbc-tooltip {
-  z-index: 1060 !important; /* 确保 Tooltip 在最上层，高于模态框的 z-index (通常是 1050 或类似) */
+  z-index: 1060 !important;
+  /* 确保 Tooltip 在最上层，高于模态框的 z-index (通常是 1050 或类似) */
   /* 其他 rbc-tooltip 样式 */
 }
 
@@ -145,83 +154,99 @@ body {
 }
 
 .next-upcoming-event {
-  background-color: #fefcbf; /* Tailwind: bg-yellow-100 */
-  border-left: 3px solid #f59e0b; /* Tailwind: border-l-4 border-amber-500 */
+  background-color: #fefcbf;
+  /* Tailwind: bg-yellow-100 */
+  border-left: 3px solid #f59e0b;
+  /* Tailwind: border-l-4 border-amber-500 */
   border-radius: 4px;
 }
 
 /* 确保高亮样式能覆盖 react-big-calendar 的默认事件背景 */
 .rbc-event.next-upcoming-event {
-    background-color: #fefcbf !important; 
-    color: #713f12 !important; /* Tailwind: text-amber-800，确保文本颜色在高亮背景下可读 */
+  background-color: #fefcbf !important;
+  color: #713f12 !important;
+  /* Tailwind: text-amber-800，确保文本颜色在高亮背景下可读 */
 }
 
 /* 可选：为高亮事件的标题添加特定样式 */
 .next-upcoming-event .rbc-event-label {
-  /* color: #713f12 !important; */ /* 示例：如果标题颜色也需要调整 */
+  /* color: #713f12 !important; */
+  /* 示例：如果标题颜色也需要调整 */
 }
 
 /* --- Custom Event Component Styles for Hover Actions --- */
 
 .custom-event-item {
-  font-size: 0.75rem; 
-  line-height: 1.1;  
+  font-size: 0.75rem;
+  line-height: 1.1;
   /* Attempt to increase height by setting min-height and vertical padding */
-  min-height: calc(1.4em + 4px); /* Approx (line-height * font-size) + total vertical padding. Adjust 1.4em factor as needed */
-  padding-top: 2px;    /* Increase vertical padding slightly */
-  padding-bottom: 2px; /* Increase vertical padding slightly */
+  min-height: calc(1.4em + 4px);
+  /* Approx (line-height * font-size) + total vertical padding. Adjust 1.4em factor as needed */
+  padding-top: 2px;
+  /* Increase vertical padding slightly */
+  padding-bottom: 2px;
+  /* Increase vertical padding slightly */
   /* padding-left/right from px-1 on component is fine, or override if needed e.g., padding-left: 2px; padding-right: 2px; */
 }
 
 .custom-event-item .event-title {
-  min-width: 0; 
-  width: 100%; 
-  padding-right: 2px; 
+  min-width: 0;
+  width: 100%;
+  padding-right: 2px;
 }
 
 .custom-event-item .event-actions {
-  position: absolute; 
-  right: 1px;         
+  position: absolute;
+  right: 1px;
   top: 50%;
   transform: translateY(-50%);
-  
+
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out; /* Removed background-color from transition */
-  flex-shrink: 0; 
+  transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+  /* Removed background-color from transition */
+  flex-shrink: 0;
 
   /* --- Remove background for hover actions --- */
-  background-color: transparent !important; 
-  /* backdrop-filter: blur(2px); */ /* Remove if previously used */
-  /* border-radius: 4px; */ /* No longer needed without a background */
-  padding: 0px 1px;   /* Adjust padding for the transparent container, mainly for spacing between buttons if any */
+  background-color: transparent !important;
+  /* backdrop-filter: blur(2px); */
+  /* Remove if previously used */
+  /* border-radius: 4px; */
+  /* No longer needed without a background */
+  padding: 0px 1px;
+  /* Adjust padding for the transparent container, mainly for spacing between buttons if any */
 }
 
 .custom-event-item:hover .event-actions {
   opacity: 1;
   visibility: visible;
-  /* background-color: transparent !important; */ /* Ensure background remains transparent on hover */
+  /* background-color: transparent !important; */
+  /* Ensure background remains transparent on hover */
 }
 
 .custom-event-item .event-actions .MuiIconButton-root {
-  padding: 1px !important; 
+  padding: 1px !important;
 }
 
 /* --- Enhanced Styles for react-big-calendar resize handles to truly not occupy space when hidden --- */
 
-.rbc-event.rbc-resizable::before, /* Left handle */
-.rbc-event.rbc-resizable::after {  /* Right handle */
+.rbc-event.rbc-resizable::before,
+/* Left handle */
+.rbc-event.rbc-resizable::after {
+  /* Right handle */
   /* Transition for opacity, visibility, and width */
   transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out, width 0.2s ease-in-out;
-  
+
   /* Default state: hidden and effectively zero-width */
   opacity: 0;
   visibility: hidden;
-  width: 0px !important; /* Force width to 0 when not hovered. Note: 0px instead of 0 for clarity with units. */
+  width: 0px !important;
+  /* Force width to 0 when not hovered. Note: 0px instead of 0 for clarity with units. */
   /* The original react-big-calendar.css will set cursor, background, border, etc. */
   /* We are primarily controlling their visibility and width here. */
-  
-  z-index: 2; /* Keep z-index if needed from previous attempts */
+
+  z-index: 2;
+  /* Keep z-index if needed from previous attempts */
 }
 
 /* On hover of a resizable event, restore their original width and visibility */
@@ -230,7 +255,152 @@ body {
 .rbc-event.rbc-resizable:hover::after {
   opacity: 1;
   visibility: visible;
-  width: 6px !important; /* Restore original width. CHECK THIS VALUE from react-big-calendar.css */
+  width: 6px !important;
+  /* Restore original width. CHECK THIS VALUE from react-big-calendar.css */
   /* If react-big-calendar.css also uses left/right for positioning, ensure they are not adversely affected */
   /* For example, if original left was 0 for ::before, it should remain so or be re-declared if needed. */
+}
+
+/* --- AI Parsing Loading Overlay --- */
+.parsing-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 99999;
+  /* 极高优先级，确保在所有模态框之上 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* 强制排除任何全屏背景和模糊效果 */
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  pointer-events: auto;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.ai-loader-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  /* 局部卡片式背景，带微弱投影 */
+  padding: 40px 60px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 20px;
+  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  max-width: 90%;
+}
+
+.pulse-orb {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+  border-radius: 50%;
+  position: relative;
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+  animation: orb-pulse 2s infinite ease-in-out;
+}
+
+.pulse-orb::before,
+.pulse-orb::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 50%;
+  background: inherit;
+  filter: blur(10px);
+  opacity: 0.6;
+  z-index: -1;
+  animation: orb-rings 2s infinite ease-out;
+}
+
+.pulse-orb::after {
+  animation-delay: 0.5s;
+}
+
+@keyframes orb-pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+  }
+
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 50px rgba(168, 85, 247, 0.8);
+  }
+}
+
+@keyframes orb-rings {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+.loading-text {
+  font-size: 1.25rem;
+  font-weight: 600;
+  background: linear-gradient(to right, #4f46e5, #9333ea, #db2777);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-shimmer 2.5s infinite linear;
+  background-size: 200% auto;
+}
+
+@keyframes text-shimmer {
+  to {
+    background-position: 200% center;
+  }
+}
+
+.ai-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.ai-dots span {
+  width: 6px;
+  height: 6px;
+  background-color: #9333ea;
+  border-radius: 50%;
+  animation: dots-wave 1.5s infinite ease-in-out;
+}
+
+.ai-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ai-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dots-wave {
+
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+
+  50% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
 }

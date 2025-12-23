@@ -11,16 +11,16 @@ function parseDateString(dateStr) {
         // 替换中文年月，并处理可能的额外字符和空格
         const standardizedStr = dateStr.replace(/年|月/g, '-').replace(/日/, '').trim();
         // 尝试多种格式解析，增加鲁棒性
-        const date = new Date(standardizedStr); 
+        const date = new Date(standardizedStr);
         if (!isNaN(date.getTime())) {
             // 基本有效性检查
-            if(date.getFullYear() < 2000 || date.getFullYear() > 2100) {
+            if (date.getFullYear() < 2000 || date.getFullYear() > 2100) {
                 console.warn(`[ParseDate-Regex] 解析出的年份不合理: ${date.getFullYear()} from ${dateStr}`);
                 return null;
             }
             return date;
-        } 
-    } catch(e) {
+        }
+    } catch (e) {
         console.error(`[ParseDate-Regex] 解析日期字符串 "${dateStr}" 出错:`, e);
     }
     console.warn(`[ParseDate-Regex] 无法解析日期字符串: ${dateStr}`);
@@ -34,24 +34,40 @@ function parseDateString(dateStr) {
  * @returns {number|null} 小时数
  */
 function parseChineseTime(timeStr, context = '') {
-    // 处理"1点半"这样的表达
-    const halfMatch = timeStr.match(/(\d{1,2})\s?(点半|半)/);
+    // 助手：将中文数字转为阿拉伯数字
+    const cnToNum = (s) => {
+        const dict = {
+            '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
+            '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+            '十一': 11, '十二': 12
+        };
+        if (!isNaN(parseInt(s))) return parseInt(s);
+        return dict[s] || null;
+    };
+
+    // 处理"十点半"、"1点半"这样的表达
+    const halfMatch = timeStr.match(/([一二两三四五六七八九十]|十一|十二|\d{1,2})\s?(点半|半)/);
     if (halfMatch) {
-        let hours = parseInt(halfMatch[1]);
+        let hours = cnToNum(halfMatch[1]);
+        if (hours === null) return null;
         if (context.includes('下午') && hours < 12) hours += 12;
         if (context.includes('上午') && hours === 12) hours = 0;
-        return hours + 0.5; // 返回小数表示半点
+        // 如果是晚上且小时数很小（如 晚上8点），自动加12
+        if (context.includes('晚上') && hours < 12) hours += 12;
+        return hours + 0.5;
     }
-    
-    // 处理"1点"这样的表达
-    const simpleMatch = timeStr.match(/(\d{1,2})\s?(点|时)/);
+
+    // 处理"十点"、"1点"这样的表达
+    const simpleMatch = timeStr.match(/([一二两三四五六七八九十]|十一|十二|\d{1,2})\s?(点|时)/);
     if (simpleMatch) {
-        let hours = parseInt(simpleMatch[1]);
+        let hours = cnToNum(simpleMatch[1]);
+        if (hours === null) return null;
         if (context.includes('下午') && hours < 12) hours += 12;
         if (context.includes('上午') && hours === 12) hours = 0;
+        if (context.includes('晚上') && hours < 12) hours += 12;
         return hours;
     }
-    
+
     // 处理时间点描述
     const timePointMap = {
         '凌晨': 2, '半夜': 2, '深夜': 23,
@@ -62,24 +78,34 @@ function parseChineseTime(timeStr, context = '') {
         '傍晚': 17,
         '晚上': 19, '晚间': 19
     };
-    
+    // ... (rest is same)
+
     for (const [point, hour] of Object.entries(timePointMap)) {
         if (timeStr.includes(point)) {
             return hour;
         }
     }
-    
+
     return null;
 }
 
 /**
  * 使用增强的正则表达式尝试从文本中解析事件信息。
  * @param {string} text - 要解析的文本。
+ * @param {number|null} timezoneOffset - 客户端时区偏移（分钟），可选。
  * @returns {{title: string, start_datetime: string|null, end_datetime: string|null, description: string|null, location: string|null}} 解析结果。
  */
-function parse(text) {
-    console.log(`[Regex Parse] 开始解析文本: "${text.substring(0, 100)}..."`);
-    
+function parse(text, timezoneOffset = null) {
+    console.log(`[Regex Parse] 开始解析文本: "${text.substring(0, 100)}...", 传入时区偏移: ${timezoneOffset}`);
+
+    // 获取当前时间（使用服务器本地时区）
+    const nowUtc = new Date();
+    // 注意：如果传入了 timezoneOffset，我们需要计算用户的本地时间
+    // timezoneOffset 是客户端时区偏移（分钟），例如 UTC+8 = -480
+    // 但在服务器端，我们直接使用服务器时间即可，因为日期计算是相对的
+    const offsetMinutes = timezoneOffset !== null ? timezoneOffset : 0;
+    const userLocalTime = new Date(); // 直接使用当前时间，不做时区转换
+
     let title = text; // 默认标题为完整文本
     let startDate = null;
     let endDate = null;
@@ -95,8 +121,8 @@ function parse(text) {
             relativeDate: /(今天|今日|明天|明日|后天|昨天|昨日)/g,
             relativeTime: /(上午|下午|早上|早晨|中午|晚上|傍晚|晚间|凌晨|半夜|深夜)/g,
             timePoint: /(凌晨|半夜|深夜|早上|早晨|上午|中午|下午|傍晚|晚上|晚间|深夜)/g,
-            simpleTime: /(\d{1,2})\s?(点|时)/g,
-            halfTime: /(\d{1,2})\s?(点半|半)/g,
+            simpleTime: /([一二两三四五六七八九十]|十一|十二|\d{1,2})\s?(点|时)/g,
+            halfTime: /([一二两三四五六七八九十]|十一|十二|\d{1,2})\s?(点半|半)/g,
             weekday: /(周一|周二|周三|周四|周五|周六|周日|星期一|星期二|星期三|星期四|星期五|星期六|星期日|周[一二三四五六日])/g
         };
 
@@ -109,18 +135,18 @@ function parse(text) {
         // 优先级1: 处理"本13:30"模式（今天具体时间）
         if (matches.todayTime.length > 0) {
             console.log("[Regex Parse] 检测到今天时间模式");
-            startDate = new Date();
+            startDate = new Date(userLocalTime);
             const match = matches.todayTime[0];
             let hours = parseInt(match[1]);
             const minutes = parseInt(match[2]);
-            
+
             // 根据上下文调整小时
             if (text.includes('下午') && hours < 12) hours += 12;
             if (text.includes('上午') && hours === 12) hours = 0;
-            
+
             startDate.setHours(hours, minutes, 0, 0);
             endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-            
+
             // 检查时间范围
             if (matches.timeRange.length > 0) {
                 const rangeMatch = matches.timeRange[0];
@@ -128,11 +154,11 @@ function parse(text) {
                 const startMinutes = parseInt(rangeMatch[2]);
                 const endHours = parseInt(rangeMatch[3]);
                 const endMinutes = parseInt(rangeMatch[4]);
-                
+
                 if (!isNaN(startHours) && !isNaN(startMinutes) && !isNaN(endHours) && !isNaN(endMinutes)) {
                     let adjustedStartHours = startHours;
                     let adjustedEndHours = endHours;
-                    
+
                     if (text.includes('下午')) {
                         if (startHours < 12) adjustedStartHours += 12;
                         if (endHours < 12) adjustedEndHours += 12;
@@ -141,7 +167,7 @@ function parse(text) {
                         if (startHours === 12) adjustedStartHours = 0;
                         if (endHours === 12) adjustedEndHours = 0;
                     }
-                    
+
                     startDate.setHours(adjustedStartHours, startMinutes, 0, 0);
                     endDate.setHours(adjustedEndHours, endMinutes, 0, 0);
                 }
@@ -153,7 +179,7 @@ function parse(text) {
             if (parsedDate) {
                 startDate = parsedDate;
                 endDate = new Date(startDate);
-                
+
                 // 尝试提取标题
                 const dateIndex = text.indexOf(matches.date[0][0]);
                 if (dateIndex > 0) {
@@ -161,10 +187,10 @@ function parse(text) {
                 } else if (text.length > matches.date[0][0].length) {
                     title = text.substring(matches.date[0][0].length).trim();
                 }
-                
+
                 // 处理时间
                 let hasTime = false;
-                
+
                 // 检查时间范围
                 if (matches.timeRange.length > 0) {
                     const rangeMatch = matches.timeRange[0];
@@ -172,11 +198,11 @@ function parse(text) {
                     const startMinutes = parseInt(rangeMatch[2]);
                     const endHours = parseInt(rangeMatch[3]);
                     const endMinutes = parseInt(rangeMatch[4]);
-                    
+
                     if (!isNaN(startHours) && !isNaN(startMinutes) && !isNaN(endHours) && !isNaN(endMinutes)) {
                         let adjustedStartHours = startHours;
                         let adjustedEndHours = endHours;
-                        
+
                         // 根据上下文调整
                         if (text.includes('下午')) {
                             if (startHours < 12) adjustedStartHours += 12;
@@ -186,21 +212,21 @@ function parse(text) {
                             if (startHours === 12) adjustedStartHours = 0;
                             if (endHours === 12) adjustedEndHours = 0;
                         }
-                        
+
                         startDate.setHours(adjustedStartHours, startMinutes, 0, 0);
                         endDate.setHours(adjustedEndHours, endMinutes, 0, 0);
                         hasTime = true;
                         console.log(`[Regex Parse] 时间范围解析成功`);
                     }
                 }
-                
+
                 // 检查具体时间
                 if (!hasTime && matches.time.length > 0) {
                     const timeMatch = matches.time[0];
                     let hours = parseInt(timeMatch[1]);
                     const minutes = parseInt(timeMatch[2]);
                     const ampm = timeMatch[3];
-                    
+
                     // 处理AM/PM
                     if (ampm) {
                         if (ampm.toLowerCase() === 'am' && hours === 12) hours = 0;
@@ -210,19 +236,19 @@ function parse(text) {
                         if (hours < 12 && text.includes('下午')) hours += 12;
                         if (hours === 12 && text.includes('上午')) hours = 0;
                     }
-                    
+
                     if (!isNaN(hours) && !isNaN(minutes)) {
                         startDate.setHours(hours, minutes, 0, 0);
                         endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
                         hasTime = true;
-                        
+
                         // 检查结束时间
                         if (matches.time.length > 1) {
                             const endTimeMatch = matches.time[1];
                             let endHours = parseInt(endTimeMatch[1]);
                             const endMinutes = parseInt(endTimeMatch[2]);
                             const endAmpm = endTimeMatch[3];
-                            
+
                             if (endAmpm) {
                                 if (endAmpm.toLowerCase() === 'am' && endHours === 12) endHours = 0;
                                 if (endAmpm.toLowerCase() === 'pm' && endHours < 12) endHours += 12;
@@ -230,7 +256,7 @@ function parse(text) {
                                 if (endHours < 12 && text.includes('下午')) endHours += 12;
                                 if (endHours === 12 && text.includes('上午')) endHours = 0;
                             }
-                            
+
                             if (!isNaN(endHours) && !isNaN(endMinutes)) {
                                 const potentialEndDate = new Date(startDate);
                                 potentialEndDate.setHours(endHours, endMinutes, 0, 0);
@@ -241,11 +267,11 @@ function parse(text) {
                         }
                     }
                 }
-                
+
                 // 处理中文时间表达
                 if (!hasTime) {
                     let eventHour = null;
-                    
+
                     if (matches.simpleTime.length > 0) {
                         eventHour = parseChineseTime(matches.simpleTime[0][0], text);
                     } else if (matches.halfTime.length > 0) {
@@ -253,7 +279,7 @@ function parse(text) {
                     } else if (matches.timePoint.length > 0) {
                         eventHour = parseChineseTime(matches.timePoint[0][0], text);
                     }
-                    
+
                     if (eventHour !== null) {
                         if (eventHour % 1 === 0.5) {
                             // 处理半点
@@ -265,7 +291,7 @@ function parse(text) {
                         hasTime = true;
                     }
                 }
-                
+
                 if (!hasTime) {
                     startDate.setHours(0, 0, 0, 0);
                     endDate.setHours(23, 59, 59, 999);
@@ -276,9 +302,9 @@ function parse(text) {
         // 优先级3: 处理相对时间
         else if (matches.relativeDate.length > 0 || matches.relativeTime.length > 0 || matches.weekday.length > 0) {
             console.log("[Regex Parse] 尝试解析相对时间");
-            
-            let relativeDate = new Date();
-            
+
+            let relativeDate = new Date(userLocalTime);
+
             // 处理相对日期
             if (matches.relativeDate.length > 0) {
                 const dateStr = matches.relativeDate[0][1];
@@ -289,7 +315,7 @@ function parse(text) {
                     case '昨天': case '昨日': relativeDate.setDate(relativeDate.getDate() - 1); break;
                 }
             }
-            
+
             // 处理星期
             if (matches.weekday.length > 0) {
                 const weekdayMap = {
@@ -301,7 +327,7 @@ function parse(text) {
                     '周六': 6, '星期六': 6, '周六': 6,
                     '周日': 0, '星期日': 0, '周日': 0
                 };
-                
+
                 const targetWeekday = weekdayMap[matches.weekday[0][1]];
                 if (targetWeekday !== undefined) {
                     const currentWeekday = relativeDate.getDay();
@@ -310,10 +336,11 @@ function parse(text) {
                     relativeDate.setDate(relativeDate.getDate() + daysToAdd);
                 }
             }
-            
+
             // 处理时间
             let eventHour = 14; // 默认下午2点
-            
+
+            // 1. 处理时间点词汇 (上午/下午)
             if (matches.relativeTime.length > 0) {
                 const timeStr = matches.relativeTime[0][1];
                 const hourMap = {
@@ -326,40 +353,49 @@ function parse(text) {
                     '晚上': 19, '晚间': 19
                 };
                 eventHour = hourMap[timeStr] || 14;
-            } else if (matches.simpleTime.length > 0) {
+            }
+
+            // 2. 如果有具体的小时数字，则覆盖/微调时间词汇
+            if (matches.simpleTime.length > 0) {
                 const parsedHour = parseChineseTime(matches.simpleTime[0][0], text);
-                eventHour = parsedHour || 14;
+                if (parsedHour !== null) eventHour = parsedHour;
             } else if (matches.halfTime.length > 0) {
                 const parsedHour = parseChineseTime(matches.halfTime[0][0], text);
-                eventHour = parsedHour || 14;
+                if (parsedHour !== null) eventHour = parsedHour;
             }
-            
+
+            // 3. 处理标准时间格式 (HH:mm)
             if (matches.time.length > 0) {
                 const timeMatch = matches.time[0];
                 let hours = parseInt(timeMatch[1]);
                 const minutes = parseInt(timeMatch[2]);
                 const ampm = timeMatch[3];
-                
+
                 if (ampm) {
                     if (ampm.toLowerCase() === 'am' && hours === 12) hours = 0;
                     if (ampm.toLowerCase() === 'pm' && hours < 12) hours += 12;
                 }
-                
+
                 if (!isNaN(hours) && !isNaN(minutes)) {
                     relativeDate.setHours(hours, minutes, 0, 0);
                 } else {
                     relativeDate.setHours(eventHour, 0, 0, 0);
                 }
             } else {
-                relativeDate.setHours(eventHour, 0, 0, 0);
+                // 如果是半点
+                if (eventHour % 1 === 0.5) {
+                    relativeDate.setHours(Math.floor(eventHour), 30, 0, 0);
+                } else {
+                    relativeDate.setHours(eventHour, 0, 0, 0);
+                }
             }
-            
+
             startDate = relativeDate;
             endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-            
+
             // 提取标题 - 更智能的清理方式
             let cleanedText = text;
-            
+
             // 只移除完整的时间表达式，保留词汇的其他部分
             cleanedText = cleanedText.replace(patterns.relativeDate, '');
             cleanedText = cleanedText.replace(patterns.relativeTime, '');
@@ -368,11 +404,11 @@ function parse(text) {
             cleanedText = cleanedText.replace(patterns.todayTime, '');
             cleanedText = cleanedText.replace(patterns.timeRange, '');
             cleanedText = cleanedText.replace(patterns.timePoint, '');
-            
+
             // 对于简单时间和半点时间，移除整个表达式
             cleanedText = cleanedText.replace(patterns.simpleTime, '');
             cleanedText = cleanedText.replace(patterns.halfTime, '');
-            
+
             title = cleanedText.trim();
         }
 
@@ -391,15 +427,24 @@ function parse(text) {
         endDate = null;
     }
 
+    // 将本地时间转换为 ISO 字符串
+    const toUtc = (date) => {
+        if (!date || isNaN(date.getTime())) return null;
+        // 直接返回 ISO 字符串，Date 对象会自动处理时区转换
+        const isoString = date.toISOString();
+        console.log(`[Regex Parse] toISO转换: 本地时间=${date.toString()}, ISO结果=${isoString}`);
+        return isoString;
+    };
+
     const result = {
         title: title,
-        start_datetime: startDate && !isNaN(startDate.getTime()) ? startDate.toISOString() : null,
-        end_datetime: endDate && startDate && !isNaN(endDate.getTime()) && endDate >= startDate ? endDate.toISOString() : null,
+        start_datetime: toUtc(startDate),
+        end_datetime: toUtc(endDate),
         description: null,
         location: null,
         is_all_day: isAllDay && startDate !== null
     };
-    
+
     console.log("[Regex Parse] 解析结果:", result);
     return result;
 }

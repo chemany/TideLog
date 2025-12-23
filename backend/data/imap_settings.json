@@ -1,0 +1,8 @@
+{
+  "email": "",
+  "password": "",
+  "imapHost": "",
+  "imapPort": 993,
+  "useTLS": true,
+  "active": false
+}

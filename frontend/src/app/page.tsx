@@ -34,7 +34,7 @@ import unifiedSettingsService from '../services/unifiedSettingsService';
 const stringToHue = (str: string): number => {
   let hash = 0;
   if (!str || str.length === 0) {
-      return Math.random() * 360; // Fallback for empty strings
+    return Math.random() * 360; // Fallback for empty strings
   }
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
@@ -118,31 +118,31 @@ export interface SlotInfo {
 
 // Backend might return date strings, so define a type for raw event data
 interface RawBackendEvent {
-    id: string | number;
-    title?: string;
-    start_datetime: string; // Expecting ISO string from backend
-    end_datetime?: string; // Expecting ISO string from backend
-    is_all_day?: boolean;
-    completed?: boolean; // <-- 新增：从后端读取
-    description?: string;
-    location?: string;
-    created_at: string;
-    updated_at: string;
+  id: string | number;
+  title?: string;
+  start_datetime: string; // Expecting ISO string from backend
+  end_datetime?: string; // Expecting ISO string from backend
+  is_all_day?: boolean;
+  completed?: boolean; // <-- 新增：从后端读取
+  description?: string;
+  location?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Type for data expected from the parsing endpoint
 interface ParsedEventData {
-    title?: string;
-    start_datetime?: string | null;
-    end_datetime?: string | null;
+  title?: string;
+  start_datetime?: string | null;
+  end_datetime?: string | null;
 }
 
 // Type matching backend's EventCreate model (for POST /events)
 interface EventCreatePayload {
   title?: string;
-    start_datetime?: string;
-    end_datetime?: string | null;
-    is_all_day?: boolean;
+  start_datetime?: string;
+  end_datetime?: string | null;
+  is_all_day?: boolean;
   description?: string;
   location?: string;
   source?: string;
@@ -172,8 +172,8 @@ export default function CalendarPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState<boolean>(false);
   const [eventToDeleteInfo, setEventToDeleteInfo] = useState<{ id: string | number | null, title: string | null }>({ id: null, title: null });
-  
-    
+
+
   // 认证相关状态
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -206,10 +206,10 @@ export default function CalendarPage() {
       // 使用ensureAuthenticated而不是isLoggedIn来验证token有效性
       const isAuthenticated = await unifiedSettingsService.ensureAuthenticated();
       const user = unifiedSettingsService.getCurrentUser();
-      
+
       setIsLoggedIn(isAuthenticated);
       setCurrentUser(user);
-      
+
       // 如果未认证或认证失败，显示登录对话框
       if (!isAuthenticated) {
         setShowLoginDialog(true);
@@ -231,7 +231,7 @@ export default function CalendarPage() {
             const rawEvents: RawBackendEvent[] = await eventsRes.json();
             const calendarEvents: MyCalendarEvent[] = rawEvents
               .map(event => ({
-                id: event.id, 
+                id: event.id,
                 title: event.title || '无标题事件',
                 start: event.start_datetime ? new Date(event.start_datetime) : null,
                 end: event.end_datetime ? new Date(event.end_datetime) : null,
@@ -242,32 +242,32 @@ export default function CalendarPage() {
                 created_at: event.created_at ? new Date(event.created_at) : undefined,
                 updated_at: event.updated_at ? new Date(event.updated_at) : undefined,
               }))
-              .filter(event => 
-                 event.id != null && 
-                 event.start instanceof Date && !isNaN(event.start.getTime()) &&
-                 event.end instanceof Date && !isNaN(event.end.getTime()) &&
-                 event.end >= event.start
+              .filter(event =>
+                event.id != null &&
+                event.start instanceof Date && !isNaN(event.start.getTime()) &&
+                event.end instanceof Date && !isNaN(event.end.getTime()) &&
+                event.end >= event.start
               )
-              .map(event => event as MyCalendarEvent & { id: string | number; start: Date; end: Date }); 
+              .map(event => event as MyCalendarEvent & { id: string | number; start: Date; end: Date });
 
             setEvents(calendarEvents);
             console.log("Events loaded on login.");
           } else {
             toast.error(`加载事件失败: ${eventsRes.statusText}`);
           }
-        } catch (error: unknown) { 
+        } catch (error: unknown) {
           console.error("加载事件时出错:", error);
           toast.error(`事件加载失败: ${error instanceof Error ? error.message : String(error)}`);
-      } finally {
+        } finally {
           setIsLoadingData(false); // 无论成功或失败都结束加载状态
         }
       };
-      
+
       loadEvents();
     } else {
       // 如果用户未登录，也要结束加载状态
-        setIsLoadingData(false);
-      }
+      setIsLoadingData(false);
+    }
 
   }, [isLoggedIn]); // 只依赖于登录状态
 
@@ -307,15 +307,15 @@ export default function CalendarPage() {
     // 使用事件ID作为缓存键，避免重复计算相同事件的样式
     const colorSource = String(event.id || event.title || `event-${Math.random()}`);
     const hue = stringToHue(colorSource);
-    
+
     // 根据完成状态调整饱和度和亮度/透明度
     const saturation = event.completed ? '40%' : '70%';
     const lightness = event.completed ? '92%' : '88%';
     const opacity = event.completed ? 0.7 : 1;
 
     const backgroundColor = `hsl(${hue}, ${saturation}, ${lightness})`;
-    const textColor = event.completed ? 'gray' : '#333'; 
-    const borderColor = `hsl(${hue}, ${event.completed ? '30%': '60%'}, ${event.completed? '85%' : '80%'})`;
+    const textColor = event.completed ? 'gray' : '#333';
+    const borderColor = `hsl(${hue}, ${event.completed ? '30%' : '60%'}, ${event.completed ? '85%' : '80%'})`;
 
     const style: React.CSSProperties = {
       backgroundColor,
@@ -346,7 +346,7 @@ export default function CalendarPage() {
    */
   const handleEventClick = useCallback((event: MyCalendarEvent) => {
     // Now using MyCalendarEvent directly, no need for complex checks/assertions
-    setSelectedEvent(event); 
+    setSelectedEvent(event);
     setSelectedSlot(null);
     setShowCreateModal(true);
     console.log("Event clicked:", event);
@@ -393,7 +393,7 @@ export default function CalendarPage() {
         id: savedEventRaw.id,
         title: savedEventRaw.title || '无标题事件',
         start: new Date(savedEventRaw.start_datetime),
-        end: savedEventRaw.end_datetime ? new Date(savedEventRaw.end_datetime) : new Date(new Date(savedEventRaw.start_datetime).getTime() + 60*60*1000),
+        end: savedEventRaw.end_datetime ? new Date(savedEventRaw.end_datetime) : new Date(new Date(savedEventRaw.start_datetime).getTime() + 60 * 60 * 1000),
         allDay: savedEventRaw.is_all_day || false,
         completed: savedEventRaw.completed || false,
         description: savedEventRaw.description,
@@ -457,11 +457,11 @@ export default function CalendarPage() {
   const findConflictingEvents = useCallback((newEvent: MyCalendarEvent, existingEvents: MyCalendarEvent[]) => {
     const newStart = newEvent.start;
     const newEnd = newEvent.end;
-    
+
     return existingEvents.filter(event => {
       // 跳过已完成的事件
       if (event.completed) return false;
-      
+
       // 检查时间重叠：新事件开始时间 < 现有事件结束时间 且 新事件结束时间 > 现有事件开始时间
       return newStart < event.end && newEnd > event.start;
     });
@@ -473,102 +473,106 @@ export default function CalendarPage() {
   const handleSubmit = useCallback(async () => {
     if (!naturalLanguageInput.trim()) { toast.error('请输入事件描述.'); return; }
     setIsParsing(true);
+    setShowSmartCreateModal(false); // 立即关闭模态框，移除其自带的背景遮罩
     const toastId = toast.loading('正在解析文本...', { id: 'parsing-toast' });
     try {
-        const parseResponse = await authenticatedFetch(`${getApiBaseUrl()}/events/parse-natural-language`, {
-            method: 'POST', body: JSON.stringify({ text: naturalLanguageInput }),
-        });
-        if (!parseResponse.ok) {
-             const errorData = await parseResponse.json().catch(() => ({ detail: `解析 API 请求失败: ${parseResponse.statusText} - ${parseResponse.status}` }));
-             const detail = (errorData as { detail?: string }).detail || `解析 API 请求失败: ${parseResponse.statusText}`;
-             if (parseResponse.status === 409) { throw new Error("LLM 未配置，请在设置中配置。"); }
-             throw new Error(detail);
-        }
-        
-        // 确保 ParsedEventData 接口定义与后端返回一致，特别是 is_all_day, description, location
-        interface ExtendedParsedEventData extends ParsedEventData {
-            is_all_day?: boolean;
-            description?: string;
-            location?: string;
-        }
-        const parsedData: ExtendedParsedEventData = await parseResponse.json();
+      const parseResponse = await authenticatedFetch(`${getApiBaseUrl()}/events/parse-natural-language`, {
+        method: 'POST', body: JSON.stringify({
+          text: naturalLanguageInput,
+          timezoneOffset: new Date().getTimezoneOffset()
+        }),
+      });
+      if (!parseResponse.ok) {
+        const errorData = await parseResponse.json().catch(() => ({ detail: `解析 API 请求失败: ${parseResponse.statusText} - ${parseResponse.status}` }));
+        const detail = (errorData as { detail?: string }).detail || `解析 API 请求失败: ${parseResponse.statusText}`;
+        if (parseResponse.status === 409) { throw new Error("LLM 未配置，请在设置中配置。"); }
+        throw new Error(detail);
+      }
 
-        if (!parsedData.start_datetime) {
-            toast.error('无法从文本中解析出有效的日期和时间。', { id: toastId });
-            setIsParsing(false);
-            return;
-        }
+      // 确保 ParsedEventData 接口定义与后端返回一致，特别是 is_all_day, description, location
+      interface ExtendedParsedEventData extends ParsedEventData {
+        is_all_day?: boolean;
+        description?: string;
+        location?: string;
+      }
+      const parsedData: ExtendedParsedEventData = await parseResponse.json();
 
-        // 将解析的数据转换为事件格式
-        const parsedEvent: MyCalendarEvent = {
-            title: parsedData.title || '未命名事件',
-            start: new Date(parsedData.start_datetime),
-            end: parsedData.end_datetime ? new Date(parsedData.end_datetime) : new Date(new Date(parsedData.start_datetime).getTime() + 60*60*1000),
-            allDay: parsedData.is_all_day || false,
-            completed: false,
-            description: parsedData.description || naturalLanguageInput,
-            location: parsedData.location,
-        };
+      if (!parsedData.start_datetime) {
+        toast.error('无法从文本中解析出有效的日期和时间。', { id: toastId });
+        setIsParsing(false);
+        return;
+      }
 
-        // 检查时间冲突
-        const conflictingEvents = findConflictingEvents(parsedEvent, events);
-        
-        if (conflictingEvents.length > 0) {
-            // 有冲突，显示冲突信息并让用户手动确认
-            const conflictNames = conflictingEvents.map(e => e.title).join('、');
-            toast.dismiss(toastId);
-            toast.error(`检测到时间冲突：${conflictNames}`, { duration: 4000 });
-            
-            // 设置解析后的事件数据并打开创建界面让用户确认
-            setSelectedEvent(parsedEvent);
-            setSelectedSlot(null);
-            setShowCreateModal(true);
-            
-            // 清空智能输入框并关闭智能创建的浮动模态框
-            setNaturalLanguageInput('');
-            setShowSmartCreateModal(false);
-        } else {
-            // 没有冲突，自动创建事件
-            toast.loading('正在创建事件...', { id: toastId });
-            
-            try {
-                // 准备事件数据用于保存
-                const eventToSave = {
-                    title: parsedEvent.title,
-                    start: parsedEvent.start,
-                    end: parsedEvent.end,
-                    allDay: parsedEvent.allDay,
-                    description: parsedEvent.description,
-                    location: parsedEvent.location,
-                    completed: parsedEvent.completed
-                };
-                
-                // 调用保存事件的函数
-                await handleSaveEventFromModal(eventToSave);
-                
-                // 清空智能输入框并关闭智能创建的浮动模态框
-                setNaturalLanguageInput('');
-                setShowSmartCreateModal(false);
-                
-                toast.success('智能创建成功！', { id: toastId });
-            } catch (saveError) {
-                console.error('自动保存事件失败:', saveError);
-                toast.error(`保存事件失败: ${saveError instanceof Error ? saveError.message : '未知错误'}`, { id: toastId });
-                
-                // 保存失败时，仍然打开编辑界面让用户手动处理
-                setSelectedEvent(parsedEvent);
-                setSelectedSlot(null);
-                setShowCreateModal(true);
-                
-                // 清空智能输入框并关闭智能创建的浮动模态框
-                setNaturalLanguageInput('');
-                setShowSmartCreateModal(false);
-            }
+      // 将解析的数据转换为事件格式
+      const parsedEvent: MyCalendarEvent = {
+        title: parsedData.title || '未命名事件',
+        start: new Date(parsedData.start_datetime),
+        end: parsedData.end_datetime ? new Date(parsedData.end_datetime) : new Date(new Date(parsedData.start_datetime).getTime() + 60 * 60 * 1000),
+        allDay: parsedData.is_all_day || false,
+        completed: false,
+        description: parsedData.description || naturalLanguageInput,
+        location: parsedData.location,
+      };
+
+      // 检查时间冲突
+      const conflictingEvents = findConflictingEvents(parsedEvent, events);
+
+      if (conflictingEvents.length > 0) {
+        // 有冲突，显示冲突信息并让用户手动确认
+        const conflictNames = conflictingEvents.map(e => e.title).join('、');
+        toast.dismiss(toastId);
+        toast.error(`检测到时间冲突：${conflictNames}`, { duration: 4000 });
+
+        // 设置解析后的事件数据并打开创建界面让用户确认
+        setSelectedEvent(parsedEvent);
+        setSelectedSlot(null);
+        setShowCreateModal(true);
+
+        // 清空智能输入框并关闭智能创建的浮动模态框
+        setNaturalLanguageInput('');
+        setShowSmartCreateModal(false);
+      } else {
+        // 没有冲突，自动创建事件
+        toast.loading('正在创建事件...', { id: toastId });
+
+        try {
+          // 准备事件数据用于保存
+          const eventToSave = {
+            title: parsedEvent.title,
+            start: parsedEvent.start,
+            end: parsedEvent.end,
+            allDay: parsedEvent.allDay,
+            description: parsedEvent.description,
+            location: parsedEvent.location,
+            completed: parsedEvent.completed
+          };
+
+          // 调用保存事件的函数
+          await handleSaveEventFromModal(eventToSave);
+
+          // 清空智能输入框并关闭智能创建的浮动模态框
+          setNaturalLanguageInput('');
+          setShowSmartCreateModal(false);
+
+          toast.success('智能创建成功！', { id: toastId });
+        } catch (saveError) {
+          console.error('自动保存事件失败:', saveError);
+          toast.error(`保存事件失败: ${saveError instanceof Error ? saveError.message : '未知错误'}`, { id: toastId });
+
+          // 保存失败时，仍然打开编辑界面让用户手动处理
+          setSelectedEvent(parsedEvent);
+          setSelectedSlot(null);
+          setShowCreateModal(true);
+
+          // 清空智能输入框并关闭智能创建的浮动模态框
+          setNaturalLanguageInput('');
+          setShowSmartCreateModal(false);
         }
+      }
 
     } catch (error) {
-        console.error("Error in natural language submission flow:", error);
-        toast.error(`处理出错: ${error instanceof Error ? error.message : '未知错误'}`, { id: toastId });
+      console.error("Error in natural language submission flow:", error);
+      toast.error(`处理出错: ${error instanceof Error ? error.message : '未知错误'}`, { id: toastId });
     } finally {
       setIsParsing(false);
     }
@@ -608,7 +612,7 @@ export default function CalendarPage() {
   }, []);
 
   // --- 处理事件拖放的回调函数 ---
-  const handleEventDrop = useCallback(async (args: { event: MyCalendarEvent, start: string | Date, end: string | Date, isAllDay?: boolean | undefined }) => { 
+  const handleEventDrop = useCallback(async (args: { event: MyCalendarEvent, start: string | Date, end: string | Date, isAllDay?: boolean | undefined }) => {
     // Use MyCalendarEvent for event type
     const { event, start, end } = args;
     const startDate = typeof start === 'string' ? new Date(start) : start;
@@ -631,113 +635,113 @@ export default function CalendarPage() {
 
     // --- 新增：根据视图类型执行不同操作 ---
     if (currentView === Views.MONTH) {
-        // 月视图拖放：只更新日期，然后打开模态框让用户确认/修改时间
+      // 月视图拖放：只更新日期，然后打开模态框让用户确认/修改时间
 
-        // 1. 保留原始时间，只更新日期
-        // const originalStartTime = typedEvent.start.getHours() * 3600000 + typedEvent.start.getMinutes() * 60000 + typedEvent.start.getSeconds() * 1000 + typedEvent.start.getMilliseconds();
-        // const originalEndTime = typedEvent.end.getHours() * 3600000 + typedEvent.end.getMinutes() * 60000 + typedEvent.end.getSeconds() * 1000 + typedEvent.end.getMilliseconds();
+      // 1. 保留原始时间，只更新日期
+      // const originalStartTime = typedEvent.start.getHours() * 3600000 + typedEvent.start.getMinutes() * 60000 + typedEvent.start.getSeconds() * 1000 + typedEvent.start.getMilliseconds();
+      // const originalEndTime = typedEvent.end.getHours() * 3600000 + typedEvent.end.getMinutes() * 60000 + typedEvent.end.getSeconds() * 1000 + typedEvent.end.getMilliseconds();
 
-        // 计算新的开始时间（新日期 + 原始时间）
-        const newStartDateWithOriginalTime = new Date(startDate); // startDate 已经包含了新的日期，时间部分可能不准 (e.g., 00:00:00)
-        newStartDateWithOriginalTime.setHours(typedEvent.start.getHours(), typedEvent.start.getMinutes(), typedEvent.start.getSeconds(), typedEvent.start.getMilliseconds());
+      // 计算新的开始时间（新日期 + 原始时间）
+      const newStartDateWithOriginalTime = new Date(startDate); // startDate 已经包含了新的日期，时间部分可能不准 (e.g., 00:00:00)
+      newStartDateWithOriginalTime.setHours(typedEvent.start.getHours(), typedEvent.start.getMinutes(), typedEvent.start.getSeconds(), typedEvent.start.getMilliseconds());
 
-        // 计算新的结束时间 (基于新的开始时间和原始时长)
-        const duration = typedEvent.end.getTime() - typedEvent.start.getTime();
-        // let newEndDateWithOriginalTime = new Date(newStartDateWithOriginalTime.getTime() + duration);
+      // 计算新的结束时间 (基于新的开始时间和原始时长)
+      const duration = typedEvent.end.getTime() - typedEvent.start.getTime();
+      // let newEndDateWithOriginalTime = new Date(newStartDateWithOriginalTime.getTime() + duration);
 
-        // 特殊处理：如果拖放导致日期变化很大，结束时间可能也需要调整日期
-        // （简单处理：如果结束日期和开始日期在同一天，用新日期+原始结束时间；否则用新开始时间+时长）
-        let finalEndDate = new Date(newStartDateWithOriginalTime.getTime() + duration); // Default to using duration
-        if (typedEvent.end.getDate() === typedEvent.start.getDate() && !typedEvent.allDay) {
-          // 如果原始事件在同一天且不是全天，尝试保留结束时间的小时分钟
-            const newEndDateCandidate = new Date(startDate); // 用拖放目标日期
-            newEndDateCandidate.setHours(typedEvent.end.getHours(), typedEvent.end.getMinutes(), typedEvent.end.getSeconds(), typedEvent.end.getMilliseconds());
-            // 如果计算出的结束时间早于开始时间（例如，原始是下午拖到了早上），则使用时长
-            if (newEndDateCandidate >= newStartDateWithOriginalTime) {
-               finalEndDate = newEndDateCandidate;
-            }
-        } else if (typedEvent.allDay) {
-           // If original was all day, keep it all day on the new date
-           finalEndDate = new Date(newStartDateWithOriginalTime);
-           finalEndDate.setHours(23, 59, 59, 999); // End of the new day
+      // 特殊处理：如果拖放导致日期变化很大，结束时间可能也需要调整日期
+      // （简单处理：如果结束日期和开始日期在同一天，用新日期+原始结束时间；否则用新开始时间+时长）
+      let finalEndDate = new Date(newStartDateWithOriginalTime.getTime() + duration); // Default to using duration
+      if (typedEvent.end.getDate() === typedEvent.start.getDate() && !typedEvent.allDay) {
+        // 如果原始事件在同一天且不是全天，尝试保留结束时间的小时分钟
+        const newEndDateCandidate = new Date(startDate); // 用拖放目标日期
+        newEndDateCandidate.setHours(typedEvent.end.getHours(), typedEvent.end.getMinutes(), typedEvent.end.getSeconds(), typedEvent.end.getMilliseconds());
+        // 如果计算出的结束时间早于开始时间（例如，原始是下午拖到了早上），则使用时长
+        if (newEndDateCandidate >= newStartDateWithOriginalTime) {
+          finalEndDate = newEndDateCandidate;
         }
+      } else if (typedEvent.allDay) {
+        // If original was all day, keep it all day on the new date
+        finalEndDate = new Date(newStartDateWithOriginalTime);
+        finalEndDate.setHours(23, 59, 59, 999); // End of the new day
+      }
 
-        // 确定拖放后是否为全天事件 (如果原始是全天，保持全天)
-        const isDroppedAsAllDay = typedEvent.allDay === true; // Keep original allDay status for month view drop
+      // 确定拖放后是否为全天事件 (如果原始是全天，保持全天)
+      const isDroppedAsAllDay = typedEvent.allDay === true; // Keep original allDay status for month view drop
 
 
-        // 2. 准备要在模态框中显示的事件数据
-        const eventToEdit: MyCalendarEvent = {
-          ...typedEvent, // 复制原始事件的其他属性 (title, description, etc.)
-          start: isDroppedAsAllDay ? new Date(startDate.setHours(0, 0, 0, 0)) : newStartDateWithOriginalTime,
-          end: isDroppedAsAllDay ? new Date(startDate.setHours(23, 59, 59, 999)) : finalEndDate,
-          allDay: isDroppedAsAllDay, // 使用原始的 allDay 状态
-        };
+      // 2. 准备要在模态框中显示的事件数据
+      const eventToEdit: MyCalendarEvent = {
+        ...typedEvent, // 复制原始事件的其他属性 (title, description, etc.)
+        start: isDroppedAsAllDay ? new Date(startDate.setHours(0, 0, 0, 0)) : newStartDateWithOriginalTime,
+        end: isDroppedAsAllDay ? new Date(startDate.setHours(23, 59, 59, 999)) : finalEndDate,
+        allDay: isDroppedAsAllDay, // 使用原始的 allDay 状态
+      };
 
-        // 3. 设置状态以打开编辑模态框
-        setSelectedEvent(eventToEdit);
-        setSelectedSlot(null); // 清除可能存在的 slot 选择
-        setShowCreateModal(true);
+      // 3. 设置状态以打开编辑模态框
+      setSelectedEvent(eventToEdit);
+      setSelectedSlot(null); // 清除可能存在的 slot 选择
+      setShowCreateModal(true);
 
-        // 4. 提示用户
-        toast('日期已更新，请在弹窗中确认或修改时间。', { icon: '🗓️' });
+      // 4. 提示用户
+      toast('日期已更新，请在弹窗中确认或修改时间。', { icon: '🗓️' });
 
-        // 注意：此处不直接调用 setEvents 或 fetch PUT
+      // 注意：此处不直接调用 setEvents 或 fetch PUT
 
     } else {
-        // 周/日/议程视图拖放：直接更新并保存 (保持原有逻辑)
-        const toastId = toast.loading('正在更新事件时间...'); // Start loading toast here
+      // 周/日/议程视图拖放：直接更新并保存 (保持原有逻辑)
+      const toastId = toast.loading('正在更新事件时间...'); // Start loading toast here
 
-        const eventId = typedEvent.id;
-        // 修正：对于非月视图拖放，我们需要使用 args 中的 isAllDay
-        const isAllDay = args.isAllDay === true || (endDate.getTime() - startDate.getTime() >= 24 * 60 * 60 * 1000);
+      const eventId = typedEvent.id;
+      // 修正：对于非月视图拖放，我们需要使用 args 中的 isAllDay
+      const isAllDay = args.isAllDay === true || (endDate.getTime() - startDate.getTime() >= 24 * 60 * 60 * 1000);
 
-        // 如果在周/日视图中拖放到全天区域，确保时间正确
-        const finalStartDate = isAllDay ? new Date(startDate.setHours(0, 0, 0, 0)) : startDate;
-        // For non-all-day events dropped in week/day view, the 'end' from args should be correct.
-        // For all-day events, set end to end of day.
-        const finalEndDate = isAllDay ? new Date(startDate.setHours(23, 59, 59, 999)) : endDate;
+      // 如果在周/日视图中拖放到全天区域，确保时间正确
+      const finalStartDate = isAllDay ? new Date(startDate.setHours(0, 0, 0, 0)) : startDate;
+      // For non-all-day events dropped in week/day view, the 'end' from args should be correct.
+      // For all-day events, set end to end of day.
+      const finalEndDate = isAllDay ? new Date(startDate.setHours(23, 59, 59, 999)) : endDate;
 
 
-        const updatedEventData = {
-          start_datetime: finalStartDate.toISOString(),
-          end_datetime: finalEndDate.toISOString(),
-          is_all_day: isAllDay,
-        };
+      const updatedEventData = {
+        start_datetime: finalStartDate.toISOString(),
+        end_datetime: finalEndDate.toISOString(),
+        is_all_day: isAllDay,
+      };
 
-        try {
-          const response = await authenticatedFetch(`${getApiBaseUrl()}/events/${eventId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updatedEventData),
-          });
+      try {
+        const response = await authenticatedFetch(`${getApiBaseUrl()}/events/${eventId}`, {
+          method: 'PUT',
+          body: JSON.stringify(updatedEventData),
+        });
 
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: '无法解析错误响应' }));
-            // Use toastId here
-            throw new Error(errorData.error || `更新事件失败: ${response.statusText}`);
-          }
-
-          const updatedEventFromServer: RawBackendEvent = await response.json();
-          console.log('事件更新成功 (非月视图):', updatedEventFromServer);
-
-          // 更新前端状态
-          setEvents(prevEvents =>
-            prevEvents.map(prevEvent =>
-              prevEvent.id === eventId
-                ? { ...prevEvent, start: finalStartDate, end: finalEndDate, allDay: isAllDay }
-                : prevEvent
-            )
-          );
-          toast.success('事件时间已更新！', { id: toastId }); // Use toastId here
-
-        } catch (error) {
-          console.error('更新事件时间时出错 (非月视图):', error);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: '无法解析错误响应' }));
           // Use toastId here
-          toast.error(`更新事件时间出错: ${error instanceof Error ? error.message : '未知错误'}`, { id: toastId });
-          // 可以在这里考虑是否需要回滚前端状态，但通常保留失败前的状态并显示错误
+          throw new Error(errorData.error || `更新事件失败: ${response.statusText}`);
         }
+
+        const updatedEventFromServer: RawBackendEvent = await response.json();
+        console.log('事件更新成功 (非月视图):', updatedEventFromServer);
+
+        // 更新前端状态
+        setEvents(prevEvents =>
+          prevEvents.map(prevEvent =>
+            prevEvent.id === eventId
+              ? { ...prevEvent, start: finalStartDate, end: finalEndDate, allDay: isAllDay }
+              : prevEvent
+          )
+        );
+        toast.success('事件时间已更新！', { id: toastId }); // Use toastId here
+
+      } catch (error) {
+        console.error('更新事件时间时出错 (非月视图):', error);
+        // Use toastId here
+        toast.error(`更新事件时间出错: ${error instanceof Error ? error.message : '未知错误'}`, { id: toastId });
+        // 可以在这里考虑是否需要回滚前端状态，但通常保留失败前的状态并显示错误
+      }
     }
-  }, [setEvents, currentView, setSelectedEvent, setShowCreateModal]); 
+  }, [setEvents, currentView, setSelectedEvent, setShowCreateModal]);
 
   // --- 新增：处理事件调整大小的回调函数 ---
   const handleEventResize = useCallback(async (args: { event: MyCalendarEvent, start: string | Date, end: string | Date }) => {
@@ -766,7 +770,7 @@ export default function CalendarPage() {
     if (endDate < startDate) {
       toast.error('结束时间不能早于开始时间。', { id: toastId });
       // 可以在这里选择不更新状态，或者将结束时间强制设为开始时间
-      return; 
+      return;
     }
 
     const eventId = typedEvent.id;
@@ -816,7 +820,7 @@ export default function CalendarPage() {
     const file = e.target.files?.[0];
     // 重置文件输入值，允许用户再次选择相同的文件
     const target = e.target;
-    target.value = ''; 
+    target.value = '';
 
     if (!file) {
       return;
@@ -825,11 +829,11 @@ export default function CalendarPage() {
     console.log(`File selected: ${file.name}, type: ${file.type}`);
 
     // 基本的文件类型前端检查 (更严格的检查在后端)
-    if (!file.type.startsWith('text/plain') && 
-        !file.type.startsWith('application/vnd.openxmlformats-officedocument.wordprocessingml.document') &&
-        !file.name.toLowerCase().endsWith('.docx')) {
-        toast.error('请选择一个纯文本 (.txt) 或 Word (.docx) 文件。');
-        return;
+    if (!file.type.startsWith('text/plain') &&
+      !file.type.startsWith('application/vnd.openxmlformats-officedocument.wordprocessingml.document') &&
+      !file.name.toLowerCase().endsWith('.docx')) {
+      toast.error('请选择一个纯文本 (.txt) 或 Word (.docx) 文件。');
+      return;
     }
 
     // 调用新的上传处理函数
@@ -849,7 +853,7 @@ export default function CalendarPage() {
       const response = await authenticatedFetch(`${getApiBaseUrl()}/events/import`, {
         method: 'POST',
         // 不需要设置 Content-Type，浏览器会为 FormData 自动设置
-        body: formData, 
+        body: formData,
       });
 
       const result = await response.json();
@@ -858,17 +862,17 @@ export default function CalendarPage() {
         // 尝试从 result 中获取更具体的错误信息
         throw new Error(result.error || `导入失败 (${response.status})`);
       }
-      
+
       // 根据后端返回的 count 显示不同消息
       if (result.count > 0) {
-          toast.success(result.message || `成功导入 ${result.count} 个事件!`, { id: toastId });
+        toast.success(result.message || `成功导入 ${result.count} 个事件!`, { id: toastId });
       } else {
-          // 如果 count 为 0 但请求成功，说明可能没找到符合格式的事件
-          toast(`🤔 ${result.message || '未找到符合格式的事件。'}`, { id: toastId, duration: 4000 });
+        // 如果 count 为 0 但请求成功，说明可能没找到符合格式的事件
+        toast(`🤔 ${result.message || '未找到符合格式的事件。'}`, { id: toastId, duration: 4000 });
       }
-      
+
       // 刷新事件列表
-      await fetchEvents(); 
+      await fetchEvents();
 
     } catch (error: unknown) {
       console.error('导入文档时出错:', error);
@@ -885,22 +889,22 @@ export default function CalendarPage() {
         const rawEvents: RawBackendEvent[] = await eventsRes.json();
         const calendarEvents: MyCalendarEvent[] = rawEvents
           .map(event => ({
-            id: event.id, 
+            id: event.id,
             title: event.title || '无标题事件',
             start: event.start_datetime ? new Date(event.start_datetime) : null,
             end: event.end_datetime ? new Date(event.end_datetime) : null,
             allDay: event.is_all_day || false,
-            completed: event.completed || false, 
+            completed: event.completed || false,
             description: event.description,
             location: event.location,
             created_at: event.created_at ? new Date(event.created_at) : undefined,
             updated_at: event.updated_at ? new Date(event.updated_at) : undefined,
           }))
-          .filter(event => 
-             event.id != null && 
-             event.start instanceof Date && !isNaN(event.start.getTime()) &&
-             event.end instanceof Date && !isNaN(event.end.getTime()) &&
-             event.end >= event.start
+          .filter(event =>
+            event.id != null &&
+            event.start instanceof Date && !isNaN(event.start.getTime()) &&
+            event.end instanceof Date && !isNaN(event.end.getTime()) &&
+            event.end >= event.start
           )
           .map(event => event as MyCalendarEvent & { id: string | number; start: Date; end: Date });
 
@@ -925,7 +929,7 @@ export default function CalendarPage() {
   // 处理登录成功后重新加载数据
   const fetchAllEvents = useCallback(async () => {
     if (!isLoggedIn) return;
-    
+
     setIsLoadingData(true);
     try {
       await fetchEvents();
@@ -944,7 +948,7 @@ export default function CalendarPage() {
     setCurrentUser(user);
     setShowLoginDialog(false);
     toast.success(`欢迎回来，${user?.username || user?.email}！`);
-    
+
     // 登录成功后重新加载数据
     fetchAllEvents();
   };
@@ -970,8 +974,8 @@ export default function CalendarPage() {
       setEventToDeleteInfo({ id: eventId, title: eventToDelete.title || '该事件' });
       setShowDeleteConfirmModal(true); // 打开模态框，而不是直接 window.confirm
     } else {
-       console.error(`[handleDeleteEvent] Event with ID ${eventId} not found in state.`);
-       toast.error('找不到要删除的事件信息。');
+      console.error(`[handleDeleteEvent] Event with ID ${eventId} not found in state.`);
+      toast.error('找不到要删除的事件信息。');
     }
   }, [events]); // 依赖 events 状态来查找标题
 
@@ -1022,30 +1026,30 @@ export default function CalendarPage() {
 
     // 乐观更新 UI
     const originalEvents = events;
-    setEvents(prevEvents => 
-      prevEvents.map(event => 
+    setEvents(prevEvents =>
+      prevEvents.map(event =>
         event.id === eventId ? { ...event, completed: newCompletedStatus } : event
       )
     );
-    
+
     // 发送请求到后端
     const toastId = toast.loading('正在更新状态...');
     try {
       const response = await authenticatedFetch(`${getApiBaseUrl()}/events/${eventId}`, {
         method: 'PUT',
-        body: JSON.stringify({ completed: newCompletedStatus }), 
+        body: JSON.stringify({ completed: newCompletedStatus }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error((errorData as {error?: string}).error || `更新失败: ${response.statusText}`);
+        throw new Error((errorData as { error?: string }).error || `更新失败: ${response.statusText}`);
       }
 
       // 后端确认成功，无需额外操作，因为 UI 已乐观更新
       const updatedEventFromServer: RawBackendEvent = await response.json();
       // 可以在这里做一次最终确认，确保前端状态与服务器一致
-      setEvents(prevEvents => 
-        prevEvents.map(event => 
+      setEvents(prevEvents =>
+        prevEvents.map(event =>
           event.id === eventId ? { ...event, completed: updatedEventFromServer.completed } : event
         )
       );
@@ -1059,7 +1063,7 @@ export default function CalendarPage() {
     }
   }, [events, setEvents]);
 
-  
+
   // 优化的 Calendar 组件配置
   const eventComponent = useCallback((props: any) => (
     <div className="calendar-event">
@@ -1074,7 +1078,7 @@ export default function CalendarPage() {
   // Calendar访问器函数优化
   const startAccessor = useCallback((event: any) => event.start, []);
   const endAccessor = useCallback((event: any) => event.end, []);
-  
+
   // Calendar视图配置优化（已移除，直接在组件中使用数组形式）
 
   // Calendar组件优化包装器 - 冻结更新但保持显示
@@ -1103,10 +1107,10 @@ export default function CalendarPage() {
         eventPropGetter={eventPropGetter as (event: RbcEvent) => { style: React.CSSProperties }}
         components={{
           event: (props) => (
-            <CustomEventComponent 
-              {...props} 
+            <CustomEventComponent
+              {...props}
               event={props.event as MyCalendarEvent}
-              onToggleComplete={handleToggleComplete} 
+              onToggleComplete={handleToggleComplete}
               onDelete={handleDeleteEvent}
               nextUpcomingEventId={nextUpcomingEventId}
             />
@@ -1120,7 +1124,41 @@ export default function CalendarPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Toaster position="top-center" />
-      
+
+      {/* AI 解析加载遮罩层 */}
+      {isParsing && (
+        <div
+          className="parsing-overlay"
+          style={{
+            background: 'transparent',
+            backdropFilter: 'none',
+            WebkitBackdropFilter: 'none'
+          }}
+        >
+          <div
+            className="ai-loader-container"
+            style={{
+              background: 'rgba(255, 255, 255, 0.9)',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.15)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              border: '1px solid rgba(0,0,0,0.05)'
+            }}
+          >
+            <div className="pulse-orb"></div>
+            <div className="flex flex-col items-center">
+              <h2 className="loading-text">AI 正在为您精准排期</h2>
+              <div className="ai-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+            <p className="text-gray-500 text-sm mt-2 opacity-80">这可能需要几秒钟，请稍候...</p>
+          </div>
+        </div>
+      )}
+
       {/* 顶部导航栏和设置按钮 - 高度调整 */}
       <div className="bg-white shadow-sm flex-shrink-0">
         <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
@@ -1137,44 +1175,44 @@ export default function CalendarPage() {
             <div className="flex items-center space-x-1.5">
               {/* 调整按钮的 padding 和字体大小 */}
               <button
-                  onClick={() => setShowSmartCreateModal(true)}
-                  className="flex items-center space-x-1 px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
-                  disabled={!isLoggedIn}
+                onClick={() => setShowSmartCreateModal(true)}
+                className="flex items-center space-x-1 px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
+                disabled={!isLoggedIn}
               >
-                  <NoteAddIcon sx={{ fontSize: '1rem' }} />
-                  <span>智能创建</span>
+                <NoteAddIcon sx={{ fontSize: '1rem' }} />
+                <span>智能创建</span>
               </button>
               <button
-                  onClick={handleDocImportClick}
-                  className="flex items-center space-x-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-1"
+                onClick={handleDocImportClick}
+                className="flex items-center space-x-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-1"
               >
-                  <FileUploadIcon sx={{ fontSize: '1rem' }} />
-                  <span>导入文档</span>
+                <FileUploadIcon sx={{ fontSize: '1rem' }} />
+                <span>导入文档</span>
               </button>
-              <input 
-                type="file" 
+              <input
+                type="file"
                 accept=".txt,.docx"
-                id="doc-import-input" 
-                style={{ display: 'none' }} 
+                id="doc-import-input"
+                style={{ display: 'none' }}
                 onChange={handleFileSelected}
               />
-              <button 
-                onClick={toggleSettings} 
+              <button
+                onClick={toggleSettings}
                 className="flex items-center space-x-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md shadow-sm text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-1"
                 disabled={!isLoggedIn}
               >
-                 <SettingsIcon sx={{ fontSize: '1rem' }} />
-                 <span>设置</span>
+                <SettingsIcon sx={{ fontSize: '1rem' }} />
+                <span>设置</span>
               </button>
-              
+
               {/* 用户菜单 */}
               {isLoggedIn && currentUser && (
-                <UserMenu 
+                <UserMenu
                   user={currentUser}
                   onLogout={handleLogout}
                 />
               )}
-              
+
               <a
                 href={notepadsUrl}
                 target="_blank"
@@ -1187,21 +1225,21 @@ export default function CalendarPage() {
           </div>
         </div>
       </div>
-      
+
       {/* 主内容区域 */}
       <main className="flex-grow container mx-auto p-2 flex flex-col">
         {/* 日历容器 - 移除内边距，高度设为 h-full */}
         {isLoadingData ? (
           <div className="text-center py-10">加载数据中...</div>
         ) : (
-          <> 
+          <>
             <div className="bg-white rounded-lg shadow h-[calc(100vh-60px)]">
               {CalendarComponent}
             </div>
           </>
         )}
       </main>
-      
+
       {/* 创建事件模态框 */}
       {showCreateModal && (
         <CreateEventModal
@@ -1213,7 +1251,7 @@ export default function CalendarPage() {
           existingEvents={events}
         />
       )}
-      
+
       {/* 智能创建模态框 (使用 MUI Modal) */}
       <Modal
         open={showSmartCreateModal}
@@ -1222,7 +1260,7 @@ export default function CalendarPage() {
       >
         <Box sx={optimizedModalStyle}>
           <h3 id="smart-create-modal-title" className="text-lg leading-6 font-medium text-gray-900 text-center mb-4">
-             智能创建事件
+            智能创建事件
           </h3>
           <div className="space-y-3">
             <label htmlFor="natural-input-modal" className="sr-only">快速创建事件:</label>
@@ -1252,25 +1290,25 @@ export default function CalendarPage() {
             >
               关闭
             </button>
-        </div>
+          </div>
         </Box>
       </Modal>
-      
+
       {/* 新增：删除确认模态框 */}
       <Modal
         open={showDeleteConfirmModal}
         onClose={() => {
-           setShowDeleteConfirmModal(false);
-           setEventToDeleteInfo({ id: null, title: null }); // 关闭时也清空信息
+          setShowDeleteConfirmModal(false);
+          setEventToDeleteInfo({ id: null, title: null }); // 关闭时也清空信息
         }}
         aria-labelledby="delete-confirm-modal-title"
       >
-        <Box sx={optimizedModalStyle}> {/* 复用智能创建的样式 */} 
+        <Box sx={optimizedModalStyle}> {/* 复用智能创建的样式 */}
           <h3 id="delete-confirm-modal-title" className="text-lg leading-6 font-medium text-gray-900 text-center mb-4">
             确认删除
           </h3>
           <p className="text-sm text-gray-700 text-center mb-6">
-            确定要删除事件 &quot;<span className="font-semibold">{eventToDeleteInfo.title}</span>&quot; 吗？<br/>此操作无法撤销。
+            确定要删除事件 &quot;<span className="font-semibold">{eventToDeleteInfo.title}</span>&quot; 吗？<br />此操作无法撤销。
           </p>
           <div className="flex justify-center space-x-4">
             <button
@@ -1283,26 +1321,26 @@ export default function CalendarPage() {
               取消
             </button>
             <button
-              onClick={confirmDeleteEvent} 
+              onClick={confirmDeleteEvent}
               className="px-4 py-2 bg-red-600 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
             >
               确认删除
             </button>
-        </div>
+          </div>
         </Box>
       </Modal>
-      
+
       {/* 设置面板组件 */}
       {showSettings && (
-        <SettingsPanel 
-          open={showSettings} 
-          onClose={toggleSettings} 
+        <SettingsPanel
+          open={showSettings}
+          onClose={toggleSettings}
           // Pass the fetchEvents function for refreshing
-          refreshEvents={fetchEvents} 
+          refreshEvents={fetchEvents}
         />
       )}
 
-      
+
       {/* 登录对话框 */}
       <LoginDialog
         open={showLoginDialog}

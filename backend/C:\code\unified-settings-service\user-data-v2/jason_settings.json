@@ -1,0 +1,38 @@
+{
+  "user_info": {
+    "user_id": "cmmd6qkqmby4tt7lvis7h",
+    "username": "jason",
+    "email": "link918@qq.com"
+  },
+  "llm": {
+    "provider": "builtin-free",
+    "model": "deepseek/deepseek-chat-v3-0324:free",
+    "updated_at": "2025-11-22T06:05:37.431Z"
+  },
+  "caldav": {
+    "username": "link918@qq.com",
+    "password": "zhangli1115",
+    "serverUrl": "dav.qq.com",
+    "updated_at": "2025-11-22T06:05:37.436Z"
+  },
+  "imap": {
+    "user": "link918@qq.com",
+    "host": "imap.qq.com",
+    "password": "zhangli1115",
+    "port": 993,
+    "tls": true,
+    "updated_at": "2025-11-22T06:05:46.717Z"
+  },
+  "exchange": {
+    "email": "",
+    "password": "",
+    "ewsUrl": "",
+    "exchangeVersion": "Exchange2013",
+    "updated_at": "2025-11-22T06:05:37.431Z"
+  },
+  "imap_filter": {
+    "sender_allowlist": [],
+    "updated_at": "2025-11-22T06:05:37.431Z"
+  },
+  "updated_at": "2025-11-22T06:05:46.719Z"
+}

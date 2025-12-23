@@ -109,33 +109,33 @@ async function initializeData() {
         imapSettings = allSettings.imap;
         caldavSettings = allSettings.caldav;
         imapFilterSettings = allSettings.imapFilter;
-        
+
         // 加载事件数据
         eventsDb = await loadEvents();
-        
+
         console.log('[初始化] 设置加载完成:');
         console.log("  - LLM设置:", { provider: llmSettings.provider, model: llmSettings.model_name });
         console.log(`  - 事件数据: ${eventsDb.length}个`);
         console.log("  - IMAP设置:", imapSettings.host ? '已配置' : '未配置');
         console.log("  - CalDAV设置:", Object.keys(caldavSettings).length > 0 ? '已配置' : '未配置');
         console.log("  - IMAP过滤设置:", `白名单${imapFilterSettings.sender_allowlist?.length || 0}项`);
-        
+
     } catch (error) {
         console.error('[初始化] 设置加载失败，使用默认值:', error);
-        
+
         // 回退到旧的加载方式
         llmSettings = await loadLLMSettings();
         eventsDb = await loadEvents();
         imapSettings = await loadImapSettings();
-        
+
         try {
             caldavSettings = await loadCalDAVSettings();
         } catch (error) {
             console.warn("CalDAV设置未找到，使用默认空设置");
             caldavSettings = {};
         }
-        
-        try { 
+
+        try {
             imapFilterSettings = loadImapFilterSettings();
         } catch (error) {
             console.warn("IMAP Filter设置加载失败，使用默认空设置:", error);
@@ -158,28 +158,28 @@ app.use(cors({
             'http://localhost:3000',
             'http://127.0.0.1:3000'
         ];
-        
+
         // 如果没有origin（比如直接访问），允许
         if (!origin) return callback(null, true);
-        
+
         // 检查是否在允许列表中
         if (allowedOrigins.includes(origin)) {
             console.log(`[CORS] 允许预定义域名访问: ${origin}`);
             return callback(null, true);
         }
-        
+
         // 检查是否是局域网IP地址 (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
         const urlObj = new URL(origin);
         const hostname = urlObj.hostname;
         const isPrivateIP = /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
-                           /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
-                           /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname);
-        
+            /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+            /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+
         if (isPrivateIP && (urlObj.port === '11000' || urlObj.port === '3000')) {
             console.log(`[CORS] 允许局域网/本地IP访问: ${origin}`);
             return callback(null, true);
         }
-        
+
         console.log(`[CORS] 拒绝未授权域名: ${origin}`);
         callback(new Error('Not allowed by CORS'));
     },
@@ -236,12 +236,12 @@ app.post('/config/llm', authenticateUser, async (req, res) => {
 
         // 使用本地设置服务保存LLM设置
         const success = await newSettingsService.saveLLMSettings(settingsToSave, userId);
-        
+
         if (success) {
             // 更新内存缓存
             llmSettings = { ...settingsToSave };
-            
-            res.status(200).json({ 
+
+            res.status(200).json({
                 message: 'LLM设置已保存。',
                 syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
@@ -260,10 +260,10 @@ app.get('/config/llm', authenticateUser, async (req, res) => {
     try {
         // 使用本地设置服务获取LLM设置
         const settings = await newSettingsService.getLLMSettings(userId);
-        
+
         // 更新内存缓存
         llmSettings = { ...settings };
-        
+
         res.status(200).json(settings);
     } catch (error) {
         console.error('[LLM配置] 获取设置失败:', error);
@@ -284,11 +284,11 @@ app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
         // 获取共享LLM设置
         const sharedSettings = newSettingsService.getSharedLLMSettings(userId);
         const providerConfig = sharedSettings.providers[provider];
-        
+
         if (providerConfig) {
             const useCustom = providerConfig.use_custom_model || false;
             let modelToDisplay = '';
-            
+
             if (useCustom) {
                 // 使用自定义模型时，优先使用custom_model，回退到model_name
                 modelToDisplay = providerConfig.custom_model || providerConfig.model_name || '';
@@ -296,7 +296,7 @@ app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
                 // 使用预定义模型时，优先使用predefined_model，回退到model_name
                 modelToDisplay = providerConfig.predefined_model || providerConfig.model_name || '';
             }
-            
+
             const settings = {
                 provider: provider,
                 api_key: providerConfig.api_key ? '********' : '', // 隐藏真实API Key
@@ -306,7 +306,7 @@ app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
                 max_tokens: providerConfig.max_tokens || 2000,
                 useCustomModel: useCustom
             };
-            
+
             res.status(200).json(settings);
         } else {
             // 如果没有配置，返回默认值
@@ -330,29 +330,29 @@ app.get('/config/llm/:provider', optionalAuth, async (req, res) => {
 // --- IMAP配置路由 ---
 app.post('/config/imap', optionalAuth, async (req, res) => {
     const newSettings = req.body;
-    if (!newSettings || 
-        typeof newSettings.email !== 'string' || 
+    if (!newSettings ||
+        typeof newSettings.email !== 'string' ||
         typeof newSettings.password !== 'string' ||
         typeof newSettings.imapHost !== 'string') {
-        return res.status(400).json({ 
-            error: '无效的IMAP设置格式。必需: email, password(授权码), imapHost' 
+        return res.status(400).json({
+            error: '无效的IMAP设置格式。必需: email, password(授权码), imapHost'
         });
     }
-    
+
     const settingsToSave = { ...newSettings };
     const userToken = req.user?.token;
-    
+
     try {
         // 使用新的设置服务保存IMAP设置
         const userId = getCurrentUserId(req);
         const userInfo = { username: req.user?.username, email: req.user?.email };
         const success = await newSettingsService.saveImapSettings(settingsToSave, userId, userInfo);
-        
+
         if (success) {
             // 更新内存缓存
             imapSettings = { ...settingsToSave };
-            
-            res.status(200).json({ 
+
+            res.status(200).json({
                 message: `已保存${imapSettings.email}的IMAP设置。`,
                 syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
@@ -367,15 +367,15 @@ app.post('/config/imap', optionalAuth, async (req, res) => {
 
 app.get('/config/imap', optionalAuth, async (req, res) => {
     const userToken = req.user?.token;
-    
+
     try {
         // 使用本地设置服务获取IMAP设置
         const settings = await newSettingsService.getImapSettings(userToken);
-        
+
         // 更新内存缓存，但不暴露密码
         imapSettings = { ...settings };
         const { password, ...settingsToSend } = settings;
-        
+
         res.status(200).json(settingsToSend);
     } catch (error) {
         console.error('[IMAP配置] 获取设置失败:', error);
@@ -388,27 +388,27 @@ app.get('/config/imap', optionalAuth, async (req, res) => {
 // --- CalDAV配置路由 ---
 app.post('/config/caldav', optionalAuth, async (req, res) => {
     const newSettings = req.body;
-    if (!newSettings || 
-        typeof newSettings.username !== 'string' || 
+    if (!newSettings ||
+        typeof newSettings.username !== 'string' ||
         typeof newSettings.password !== 'string' ||
         typeof newSettings.serverUrl !== 'string') {
-        return res.status(400).json({ 
-            error: '无效的CalDAV设置格式。必需: username, password, serverUrl' 
+        return res.status(400).json({
+            error: '无效的CalDAV设置格式。必需: username, password, serverUrl'
         });
     }
-    
+
     const settingsToSave = { ...newSettings };
     const userToken = req.user?.token;
-    
+
     try {
         // 使用本地设置服务保存CalDAV设置
         const success = await newSettingsService.saveCalDAVSettings(settingsToSave, userToken);
-        
+
         if (success) {
             // 更新内存缓存
             caldavSettings = { ...settingsToSave };
-            
-            res.status(200).json({ 
+
+            res.status(200).json({
                 message: `已保存${caldavSettings.username}的CalDAV设置。`,
                 syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
@@ -423,15 +423,15 @@ app.post('/config/caldav', optionalAuth, async (req, res) => {
 
 app.get('/config/caldav', optionalAuth, async (req, res) => {
     const userToken = req.user?.token;
-    
+
     try {
         // 使用本地设置服务获取CalDAV设置
         const settings = await newSettingsService.getCalDAVSettings(userToken);
-        
+
         // 更新内存缓存，但不暴露密码
         caldavSettings = { ...settings };
         const { password, ...settingsToSend } = settings;
-        
+
         res.status(200).json(settingsToSend);
     } catch (error) {
         console.error('[CalDAV配置] 获取设置失败:', error);
@@ -451,17 +451,17 @@ app.get('/settings/llm', authenticateUser, async (req, res) => {
         console.log('[LLM设置API] 获取前端安全配置，用户ID:', userId);
         // 返回前端安全版本的LLM设置（包含占位符）
         const settings = newSettingsService.getCalendarLLMSettings(userId);
-        
-        console.log('[LLM设置API] 返回安全配置:', { 
-            provider: settings.provider, 
+
+        console.log('[LLM设置API] 返回安全配置:', {
+            provider: settings.provider,
             hasApiKey: !!settings.api_key,
             apiKeyType: settings.api_key === 'BUILTIN_PROXY' ? 'placeholder' : 'masked'
         });
-        
+
         res.status(200).json(settings);
     } catch (error) {
         console.error('[LLM设置API] 获取设置失败:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: '获取LLM设置失败',
             provider: 'builtin-free',
             api_key: 'BUILTIN_PROXY',
@@ -520,10 +520,10 @@ app.get('/settings/caldav', authenticateUser, async (req, res) => {
         const userInfo = { username: req.user.username, email: req.user.email };
         const settings = await newSettingsService.getCalDAVSettings(userId, userInfo);
         console.log(`[CalDAV设置API] 读取到的设置:`, settings);
-        
+
         // 更新内存缓存
         caldavSettings = { ...settings };
-        
+
         // 转换为前端期望的格式并移除密码，但添加密码状态指示
         const frontendSettings = {
             username: settings.username || '',
@@ -532,7 +532,7 @@ app.get('/settings/caldav', authenticateUser, async (req, res) => {
             hasPassword: !!settings.password // 添加密码状态标识
         };
         console.log(`[CalDAV设置API] 转换为前端格式:`, frontendSettings);
-        
+
         res.status(200).json(frontendSettings);
     } catch (error) {
         console.error('[CalDAV设置API] 获取设置失败:', error);
@@ -571,17 +571,17 @@ app.post('/settings/caldav', authenticateUser, async (req, res) => {
             return res.status(500).json({ error: '无法获取现有设置' });
         }
     }
-    
+
     try {
         // 使用新的设置服务保存CalDAV设置
         const userInfo = { username: req.user.username, email: req.user.email };
         const success = await newSettingsService.saveCalDAVSettings(settingsToSave, userId, userInfo);
-        
+
         if (success) {
             // 更新内存缓存
             caldavSettings = { ...settingsToSave };
-            
-            res.status(200).json({ 
+
+            res.status(200).json({
                 message: `已保存${caldavSettings.username}的CalDAV设置。`,
                 syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
@@ -598,16 +598,16 @@ app.post('/settings/caldav', authenticateUser, async (req, res) => {
 app.get('/settings/imap', authenticateUser, async (req, res) => {
     const userId = getCurrentUserId(req);
     console.log(`[IMAP设置API] 获取IMAP设置 - userId: ${userId}`);
-    
+
     try {
         // 使用新的设置服务获取IMAP设置
         const userInfo = { username: req.user.username, email: req.user.email };
         const settings = await newSettingsService.getImapSettings(userId, userInfo);
         console.log(`[IMAP设置API] 读取到的设置:`, settings);
-        
+
         // 更新内存缓存
         imapSettings = { ...settings };
-        
+
         // 转换为前端期望的格式并移除密码，但添加密码状态指示
         const frontendSettings = {
             email: settings.user || settings.email || '',
@@ -618,7 +618,7 @@ app.get('/settings/imap', authenticateUser, async (req, res) => {
             hasPassword: !!settings.password // 添加密码状态标识
         };
         console.log(`[IMAP设置API] 转换为前端格式:`, frontendSettings);
-        
+
         res.status(200).json(frontendSettings);
     } catch (error) {
         console.error('[IMAP设置API] 获取设置失败:', error);
@@ -636,28 +636,28 @@ app.get('/settings/imap', authenticateUser, async (req, res) => {
 
 app.post('/settings/imap', authenticateUser, async (req, res) => {
     const newSettings = req.body;
-    if (!newSettings || 
-        typeof newSettings.email !== 'string' || 
+    if (!newSettings ||
+        typeof newSettings.email !== 'string' ||
         typeof newSettings.password !== 'string' ||
         typeof newSettings.imapHost !== 'string') {
-        return res.status(400).json({ 
-            error: '无效的IMAP设置格式。必需: email, password(授权码), imapHost' 
+        return res.status(400).json({
+            error: '无效的IMAP设置格式。必需: email, password(授权码), imapHost'
         });
     }
-    
+
     const settingsToSave = { ...newSettings };
     const userId = getCurrentUserId(req);
-    
+
     try {
         // 使用新的设置服务保存IMAP设置
         const userInfo = { username: req.user.username, email: req.user.email };
         const success = await newSettingsService.saveImapSettings(settingsToSave, userId, userInfo);
-        
+
         if (success) {
             // 更新内存缓存
             imapSettings = { ...settingsToSave };
-            
-            res.status(200).json({ 
+
+            res.status(200).json({
                 message: `已保存${imapSettings.email}的IMAP设置。`,
                 syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
             });
@@ -685,19 +685,33 @@ const { getStartEndDateForSync } = require('./utils'); // <-- 确保导入或定
  * @param {string} userToken - 用户认证token，用于访问统一设置服务
  * @returns {Object|null} 解析后的事件对象，失败时返回null
  */
-async function parseTextWithLLM(text, userId = null, userToken = null) {
+async function parseTextWithLLM(text, userId = null, userToken = null, clientTimezoneOffset = null) {
     console.log(`[LLM Parse Util] 开始解析: "${text}"`);
-    
+
+    // 使用客户端提供的时区偏移，如果没有则使用服务器本地时区
+    // 使用客户端提供的时区偏移，如果没有则使用服务器本地时区
+    // 严谨判断：clientTimezoneOffset 可能为 undefined，需要显式检查
+    const offsetMinutes = (clientTimezoneOffset !== null && clientTimezoneOffset !== undefined)
+        ? Number(clientTimezoneOffset)
+        : new Date().getTimezoneOffset();
+
+    const offsetHours = -offsetMinutes / 60;
+    const sign = offsetHours >= 0 ? '+' : '-';
+    const absOffsetHours = Math.abs(offsetHours);
+    const offsetString = `${sign}${String(Math.floor(absOffsetHours)).padStart(2, '0')}:${String((absOffsetHours % 1) * 60).padStart(2, '0')}`;
+
+    console.log(`[LLM Parse] Timezone calculation: offsetMinutes=${offsetMinutes}, offsetString=${offsetString}`);
+
     // 1. 获取LLM配置（带缓存机制）
     let currentLlmSettings = null;
-    
+
     // 检查缓存是否有效
     const now = Date.now();
-    const isCacheValid = llmConfigCache.data && 
-                        llmConfigCache.userId === userId &&
-                        llmConfigCache.lastUpdated &&
-                        (now - llmConfigCache.lastUpdated) < llmConfigCache.cacheTimeout;
-    
+    const isCacheValid = llmConfigCache.data &&
+        llmConfigCache.userId === userId &&
+        llmConfigCache.lastUpdated &&
+        (now - llmConfigCache.lastUpdated) < llmConfigCache.cacheTimeout;
+
     if (isCacheValid) {
         console.log(`[LLM Parse Util] 使用缓存的LLM配置 (用户: ${userId})`);
         currentLlmSettings = { ...llmConfigCache.data };
@@ -736,21 +750,21 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
             return null;
         }
     }
-    
+
     // 2. 验证LLM配置是否有效
     if (!currentLlmSettings || !currentLlmSettings.provider || currentLlmSettings.provider === 'none') {
         console.error("[LLM Parse Util] LLM配置无效或未设置");
         return null;
     }
-    
+
     console.log('[LLM Parse Util] 最终使用的LLM配置:', currentLlmSettings.provider);
-    
+
     // 3. 内置模型配置已经通过getInternalLLMSettings获取，无需重复处理
     console.log('[LLM Parse Util] 使用已获取的LLM配置:', currentLlmSettings.provider);
-    
+
     // 验证特定提供商的配置
     console.log('[LLM Parse Util] 调试配置信息:', JSON.stringify(currentLlmSettings, null, 2));
-    
+
     if ((currentLlmSettings.provider === 'builtin' || currentLlmSettings.provider === 'builtin-free') && !currentLlmSettings.api_key) {
         console.error(`[LLM Parse Util] ${currentLlmSettings.provider} 需要API密钥, 当前api_key: "${currentLlmSettings.api_key}"`);
         return null;
@@ -788,37 +802,59 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
         }
 
         console.log(`[LLM Parse Util] 已初始化客户端: ${currentLlmSettings.provider}, 模型: ${modelToUse}`);
-        
+
         // 5. 构建 Prompt
-        const offsetMinutes = new Date().getTimezoneOffset();
-        const offsetHours = -offsetMinutes / 60;
-        const sign = offsetHours >= 0 ? '+' : '-';
-        const absOffsetHours = Math.abs(offsetHours);
-        const offsetString = `${sign}${String(Math.floor(absOffsetHours)).padStart(2, '0')}:${String((absOffsetHours % 1) * 60).padStart(2, '0')}`;
-        
-        // 获取当前日期的精确信息
-        const currentDate = new Date();
-        const currentDateString = currentDate.toISOString().split('T')[0]; // YYYY-MM-DD格式
-        const currentYear = currentDate.getFullYear();
-        const currentMonth = currentDate.getMonth() + 1;
-        const currentDay = currentDate.getDate();
-        const currentWeekday = ['日', '一', '二', '三', '四', '五', '六'][currentDate.getDay()];
-        
+        // 时区信息已在函数顶部计算完成
+
+        // 获取当前日期的精确信息（基于用户时区）
+        const nowUtc = new Date();
+        // 计算用户当地时间
+        const userLocalTime = new Date(nowUtc.getTime() - (offsetMinutes * 60 * 1000));
+
+        const currentDateString = userLocalTime.toISOString().split('T')[0]; // YYYY-MM-DD格式
+        const currentYear = userLocalTime.getFullYear();
+        const currentMonth = userLocalTime.getMonth() + 1;
+        const currentDay = userLocalTime.getDate();
+        const currentWeekday = ['日', '一', '二', '三', '四', '五', '六'][userLocalTime.getDay()];
+
+        // 生成本周每一天的日期映射
+        const weekDates = {};
+        for (let i = 0; i < 7; i++) {
+            const dayOffset = i - userLocalTime.getDay();
+            const date = new Date(userLocalTime.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+            const weekdayName = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][i];
+            weekDates[weekdayName] = date.toISOString().split('T')[0];
+        }
+
         const prompt = `
-请精确解析以下自然语言描述，提取日历事件信息。
+# 立即输出指令 (CRITICAL): 
+禁止思考，禁止输出任何推理过程，不要使用 <think> 标签。
+立即且仅输出解析后的 JSON 对象。
+
+**待解析文本:**
+"${text}"
 
 **关键上下文:**
 - **当前日期:** ${currentDateString} (星期${currentWeekday})
 - **用户时区:** UTC${offsetString}
 - **年份:** ${currentYear}年
 
+**本周日期映射（重要！）:**
+- ${weekDates['周一']} = 周一/星期一
+- ${weekDates['周二']} = 周二/星期二
+- ${weekDates['周三']} = 周三/星期三
+- ${weekDates['周四']} = 周四/星期四
+- ${weekDates['周五']} = 周五/星期五
+- ${weekDates['周六']} = 周六/星期六
+- ${weekDates['周日']} = 周日/星期日
+
 **精确时间解析规则:**
 1. **相对日期识别:**
    - "今天" = ${currentDateString}
-   - "明天" = ${new Date(currentDate.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
-   - "后天" = ${new Date(currentDate.getTime() + 48 * 60 * 60 * 1000).toISOString().split('T')[0]}
-   - "昨天" = ${new Date(currentDate.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
-   - "本周五/下周一" = 根据当前日期计算具体日期
+   - "明天" = ${new Date(userLocalTime.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+   - "后天" = ${new Date(userLocalTime.getTime() + 48 * 60 * 60 * 1000).toISOString().split('T')[0]}
+   - "昨天" = ${new Date(userLocalTime.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+   - "周X" = 严格按照上面的本周日期映射
    - "本13:30" = 今天的13:30，不是"本周五"
 
 2. **时间点精确映射:**
@@ -830,10 +866,11 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
    - "半夜" = 23:00-01:00
 
 3. **具体时间解析:**
-   - "1点半/一点半" = 13:30 (下午) 或 01:30 (凌晨，需根据上下文)
-   - "下午1点半" = 13:30
-   - "14:00/两点" = 14:00
-   - "18:30/六点半" = 18:30
+   - "上午10点" = 10:00 (上午)
+   - "下午2:00" = 14:00 (下午)
+   - "1点半/一点半" = 13:30 (默认下午) 或 01:30 (需识别是否有"凌晨")
+   - "10:00" = 10:00 (上午)
+   - "22:00" = 22:00 (晚上)
 
 4. **时长推断:**
    - 会议通常1-2小时
@@ -845,31 +882,31 @@ async function parseTextWithLLM(text, userId = null, userToken = null) {
    - 例如: 北京时间14:00 (UTC+8) = UTC 06:00
 
 **输出格式要求:**
-严格按照以下JSON格式输出，确保时间准确性：
+严格按照以下JSON格式输出本地时间（不要进行UTC转换，不要添加 'Z' 或时区偏移后缀）：
 {
   "title": "简洁的事件标题",
-  "start_datetime": "YYYY-MM-DDTHH:mm:ss.SSSZ",
-  "end_datetime": "YYYY-MM-DDTHH:mm:ss.SSSZ", 
+  "start_datetime": "YYYY-MM-DDTHH:mm:ss",
+  "end_datetime": "YYYY-MM-DDTHH:mm:ss", 
   "description": "详细描述",
   "location": "地点"
 }
 
 **验证示例:**
-- "今天下午1点半开会" → start_datetime: "${currentDateString}T13:30:00+08:00" → UTC: "${currentDateString}T05:30:00.000Z"
-- "13:30-16:30开会" → start_datetime: "${currentDateString}T13:30:00+08:00", end_datetime: "${currentDateString}T16:30:00+08:00"
+- "今天下午1点半开会" → start_datetime: "${currentDateString}T13:30:00"
+- "13:30-16:30开会" → start_datetime: "${currentDateString}T13:30:00", end_datetime: "${currentDateString}T16:30:00"
 
 **强制要求:**
 1. 只返回JSON对象，无任何额外文字
 2. 确保JSON格式完整正确
-3. 时间必须准确转换为UTC
+3. 时间必须使用本地时间格式，**绝对不要**添加 'Z'
 4. 无法解析时间时start_datetime设为null
 
 待解析文本:
 "${text}"
 
-JSON结果:
+**禁止思考，直接输出 JSON:**
 `;
-        
+
         // 6. 调用 LLM API
         let llmResponseContent = '';
         try {
@@ -878,18 +915,18 @@ JSON结果:
             const completionParams = {
                 model: modelToUse,
                 messages: [
-                    { role: "system", content: "你是专业的日历事件解析AI助手。严格遵守指令：1. 只输出完整JSON对象；2. 不包含任何额外文字、解释或格式化；3. 确保JSON语法完美；4. 时间转换必须准确；5. 优先处理中文时间表达习惯。特别注意：'本13:30'指今天13:30，不是本周五；'下午1点半'=13:30；'1-4点'表示持续时间。" },
+                    { role: "system", content: "你是专业的日历事件解析AI助手。执行直接输出模式：1. 禁止思考，不要输出任何推理、解释或 <think> 标签；2. 立即输出完整JSON对象；3. 不包含任何额外文字；4. 时间使用本地格式；5. 严禁使用任何 Markdown 格式以外的包装。" },
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.1,
                 max_tokens: currentLlmSettings.max_tokens || 2000
             };
-            
+
             // 只有OpenAI和兼容的API才支持response_format
             if (currentLlmSettings.provider === 'openai' || currentLlmSettings.provider === 'builtin-free') {
                 completionParams.response_format = { type: "json_object" };
             }
-            
+
             const completion = await openaiClient.chat.completions.create(completionParams);
 
             llmResponseContent = completion?.choices?.[0]?.message?.content?.trim() ?? '';
@@ -907,12 +944,12 @@ JSON结果:
         // 7. 解析并验证 LLM 响应 - 增强版JSON修复机制
         let parsedResult = null;
         let jsonParseAttempts = [];
-        
+
         // 尝试多种JSON修复策略
         const repairStrategies = [
             // 策略1: 原始内容直接解析
             () => llmResponseContent,
-            
+
             // 策略2: 修复截断的JSON（缺少结尾括号）
             () => {
                 if (!llmResponseContent.trim().endsWith('}')) {
@@ -921,7 +958,7 @@ JSON结果:
                 }
                 return null;
             },
-            
+
             // 策略3: 移除markdown代码块
             () => {
                 console.log("[LLM Parse Util] 策略3: 清理markdown格式");
@@ -929,21 +966,21 @@ JSON结果:
                     .replace(/```json\s*/g, '')
                     .replace(/```\s*/g, '')
                     .trim();
-                
+
                 // 找到JSON开始位置
                 const firstBrace = cleaned.indexOf('{');
                 if (firstBrace > 0) {
                     cleaned = cleaned.substring(firstBrace);
                 }
-                
+
                 // 确保以}结尾
                 if (!cleaned.endsWith('}')) {
                     cleaned += '}';
                 }
-                
+
                 return cleaned;
             },
-            
+
             // 策略4: 提取JSON对象（处理前后有文字的情况）
             () => {
                 console.log("[LLM Parse Util] 策略4: 提取JSON对象");
@@ -953,14 +990,14 @@ JSON结果:
                 }
                 return null;
             },
-            
+
             // 策略5: 修复缺少引号的键名
             () => {
                 console.log("[LLM Parse Util] 策略5: 修复JSON键名引号");
                 let repaired = llmResponseContent;
                 // 修复类似 {title: "会议"} 的情况
                 repaired = repaired.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-                
+
                 // 确保以{开头和}结尾
                 if (!repaired.trim().startsWith('{')) {
                     repaired = '{' + repaired.trim();
@@ -968,15 +1005,15 @@ JSON结果:
                 if (!repaired.trim().endsWith('}')) {
                     repaired = repaired.trim() + '}';
                 }
-                
+
                 return repaired;
             },
-            
+
             // 策略6: 智能补全JSON结构
             () => {
                 console.log("[LLM Parse Util] 策略6: 智能补全JSON");
                 let content = llmResponseContent.trim();
-                
+
                 // 移除所有非JSON内容
                 if (!content.startsWith('{')) {
                     const braceIndex = content.indexOf('{');
@@ -984,20 +1021,20 @@ JSON结果:
                         content = content.substring(braceIndex);
                     }
                 }
-                
+
                 // 分析JSON结构并补全
                 const openBraces = (content.match(/\{/g) || []).length;
                 const closeBraces = (content.match(/\}/g) || []).length;
                 const missingBraces = openBraces - closeBraces;
-                
+
                 if (missingBraces > 0) {
                     content += '}'.repeat(missingBraces);
                 }
-                
+
                 return content;
             }
         ];
-        
+
         // 依次尝试各种修复策略
         for (let i = 0; i < repairStrategies.length; i++) {
             try {
@@ -1012,19 +1049,19 @@ JSON结果:
                 console.log(`[LLM Parse Util] 策略${i + 1}失败:`, strategyError.message);
             }
         }
-        
+
         // 如果所有策略都失败，记录尝试过程
         if (!parsedResult) {
             console.error("[LLM Parse Util] 所有JSON修复策略失败");
             console.log("[LLM Parse Util] 修复尝试记录:", jsonParseAttempts);
             throw new Error('无法解析LLM返回的JSON内容');
         }
-            
+
         // 验证解析结果
         if (!parsedResult || typeof parsedResult !== 'object') {
             throw new Error('LLM 返回的不是有效的 JSON 对象');
         }
-        
+
         // 验证并清理数据
         const result = {
             title: parsedResult.title && typeof parsedResult.title === 'string' ? parsedResult.title.trim() : null,
@@ -1033,11 +1070,11 @@ JSON结果:
             description: parsedResult.description && typeof parsedResult.description === 'string' ? parsedResult.description.trim() : null,
             location: parsedResult.location && typeof parsedResult.location === 'string' ? parsedResult.location.trim() : null
         };
-        
+
         // 增强的时间格式验证和修复
         if (result.start_datetime) {
             // 尝试修复各种时间格式并确保UTC转换
-            const fixedStartTime = fixDateTimeFormat(result.start_datetime);
+            const fixedStartTime = fixDateTimeFormat(result.start_datetime, offsetString);
             if (fixedStartTime) {
                 result.start_datetime = fixedStartTime;
                 console.log("[LLM Parse Util] 开始时间修复成功:", fixedStartTime);
@@ -1046,9 +1083,9 @@ JSON结果:
                 result.start_datetime = null;
             }
         }
-        
+
         if (result.end_datetime) {
-            const fixedEndTime = fixDateTimeFormat(result.end_datetime);
+            const fixedEndTime = fixDateTimeFormat(result.end_datetime, offsetString);
             if (fixedEndTime) {
                 result.end_datetime = fixedEndTime;
                 console.log("[LLM Parse Util] 结束时间修复成功:", fixedEndTime);
@@ -1057,12 +1094,12 @@ JSON结果:
                 result.end_datetime = null;
             }
         }
-        
+
         // 智能推断结束时间
         if (result.start_datetime && !result.end_datetime) {
             const startDate = new Date(result.start_datetime);
             let durationMs = 60 * 60 * 1000; // 默认1小时
-            
+
             // 根据标题智能推断时长
             if (result.title) {
                 const titleLower = result.title.toLowerCase();
@@ -1076,118 +1113,105 @@ JSON结果:
                     durationMs = 60 * 60 * 1000; // 用餐默认1小时
                 }
             }
-            
+
             result.end_datetime = new Date(startDate.getTime() + durationMs).toISOString();
-            console.log(`[LLM Parse Util] 智能推断结束时间 (+${durationMs/60000}分钟):`, result.end_datetime);
+            console.log(`[LLM Parse Util] 智能推断结束时间 (+${durationMs / 60000}分钟):`, result.end_datetime);
         }
-        
+
         // 验证时间逻辑关系
         if (result.start_datetime && result.end_datetime) {
             const startDate = new Date(result.start_datetime);
             const endDate = new Date(result.end_datetime);
-            
+
             if (endDate <= startDate) {
                 console.warn("[LLM Parse Util] 结束时间早于开始时间，自动调整");
                 result.end_datetime = new Date(startDate.getTime() + 60 * 60 * 1000).toISOString();
             }
         }
-        
+
         console.log("[LLM Parse Util] 解析成功:", result);
         return result;
 
-        } catch (parseError) {
-            console.error("[LLM Parse Util] JSON解析失败:", parseError);
-            console.log("[LLM Parse Util] 原始响应内容:", llmResponseContent);
-            return null; // 返回null让调用者处理fallback
-        }
+    } catch (parseError) {
+        console.error("[LLM Parse Util] JSON解析失败:", parseError);
+        console.log("[LLM Parse Util] 原始响应内容:", llmResponseContent);
+        return null; // 返回null让调用者处理fallback
+    }
 
-        // 辅助函数：修复时间格式和时区转换
-        function fixDateTimeFormat(datetimeStr) {
-            if (!datetimeStr) return null;
-            
-            try {
-                // 如果已经是有效的ISO格式，直接返回
-                if (!isNaN(new Date(datetimeStr).getTime())) {
-                    const date = new Date(datetimeStr);
-                    // 确保是UTC时间
-                    return date.toISOString();
-                }
-                
-                // 尝试修复常见格式问题
-                let fixed = datetimeStr.trim();
-                
-                // 1. 处理带时区的时间格式 (如 2025-09-12T13:30:00+08:00)
-                if (fixed.includes('+') || fixed.includes('-')) {
-                    // 这种格式已经是完整的，直接尝试解析
-                    if (!isNaN(new Date(fixed).getTime())) {
-                        return new Date(fixed).toISOString();
-                    }
-                    
-                    // 修复时区格式：将 +0800 转换为 +08:00
-                    if (fixed.includes('+') && !fixed.includes(':') && fixed.length > 19) {
-                        fixed = fixed.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
-                    }
-                }
-                // 2. 处理没有时区的时间格式
-                else if (!fixed.includes('Z')) {
-                    // 如果是本地时间格式，需要转换为UTC
-                    const localDate = new Date(fixed);
-                    if (!isNaN(localDate.getTime())) {
-                        // 本地时间已经正确解析，直接返回ISO格式
-                        return localDate.toISOString();
-                    }
-                    
-                    // 修复不完整的格式
-                    if (fixed.length === 16) { // YYYY-MM-DDTHH:mm
-                        fixed += ':00';
-                    }
-                    if (fixed.length === 19) { // YYYY-MM-DDTHH:mm:ss
-                        fixed += '.000';
-                    }
-                    
-                    // 添加UTC标记
-                    if (!fixed.includes('Z') && !fixed.includes('+') && !fixed.includes('-')) {
-                        // 假设是本地时间，让JavaScript自动处理时区转换
-                        const localDate = new Date(fixed);
-                        if (!isNaN(localDate.getTime())) {
-                            return localDate.toISOString();
-                        }
-                    }
-                }
-                
-                // 最后尝试：直接解析并返回
+    // 辅助函数：修复时间格式和时区转换
+    function fixDateTimeFormat(datetimeStr, offsetString = '') {
+        if (!datetimeStr) return null;
+
+        try {
+            // 尝试修复常见格式问题
+            let fixed = datetimeStr.trim();
+
+            // 强制处理：如果 LLM 输出了带 Z 的时间，但在我们的语境下通常它是误加的本地时间
+            // 我们优先信任用户时区偏移，除非明确包含 +/- 偏移
+            if (fixed.endsWith('Z')) {
+                fixed = fixed.substring(0, fixed.length - 1);
+                console.log(`[LLM Parse Util] 移除误加的 'Z' 后缀: ${fixed}`);
+            }
+
+            // 1. 处理带时区偏移的时间格式 (如 2025-09-12T13:30:00+08:00)
+            // 检查是否包含 '+' 或 '-' 且 '-' 不是日期分隔符
+            if (fixed.includes('+') || (fixed.includes('-') && fixed.split('-').length > 3)) {
+                // 这种格式已经是完整的，直接尝试解析
                 if (!isNaN(new Date(fixed).getTime())) {
                     return new Date(fixed).toISOString();
                 }
-                
-                return null;
-            } catch (error) {
-                console.warn("[fixDateTimeFormat] 修复时间格式失败:", error.message);
+            }
+
+            // 2. 处理没有时区的时间格式（包括被我们剥离了 Z 的格式）
+            // 修复不完整的格式
+            if (fixed.length === 16) { // YYYY-MM-DDTHH:mm
+                fixed += ':00';
+            }
+            if (fixed.length === 19) { // YYYY-MM-DDTHH:mm:ss
+                fixed += '.000';
+            }
+
+            // 强制附加用户时区进行解析
+            console.log(`[LLM Parse Util] 为时间附加用户时区: ${offsetString} (原始: ${datetimeStr})`);
+            const dateWithOffset = new Date(fixed + offsetString);
+            if (!isNaN(dateWithOffset.getTime())) {
+                return dateWithOffset.toISOString();
+            }
+
+            // Fallback: 如果附加时区失败，尝试直接解析
+            const localDate = new Date(fixed);
+            if (!isNaN(localDate.getTime())) {
+                return localDate.toISOString();
+            }
+
+            return null;
+        } catch (error) {
+            console.warn("[fixDateTimeFormat] 修复时间格式失败:", error.message);
+            return null;
+        }
+    }
+
+    // 辅助函数：确保时间是UTC格式
+    function ensureUTCTime(dateOrString) {
+        if (!dateOrString) return null;
+
+        try {
+            let date;
+            if (typeof dateOrString === 'string') {
+                date = new Date(dateOrString);
+            } else {
+                date = dateOrString;
+            }
+
+            if (isNaN(date.getTime())) {
                 return null;
             }
+
+            return date.toISOString();
+        } catch (error) {
+            return null;
         }
-        
-        // 辅助函数：确保时间是UTC格式
-        function ensureUTCTime(dateOrString) {
-            if (!dateOrString) return null;
-            
-            try {
-                let date;
-                if (typeof dateOrString === 'string') {
-                    date = new Date(dateOrString);
-                } else {
-                    date = dateOrString;
-                }
-                
-                if (isNaN(date.getTime())) {
-                    return null;
-                }
-                
-                return date.toISOString();
-            } catch (error) {
-                return null;
-            }
-        }
+    }
 
 }
 
@@ -1202,42 +1226,42 @@ JSON结果:
 function findConflictingEvents(newEvent, existingEvents, excludeEventId = null) {
     const newStart = new Date(newEvent.start_datetime);
     const newEnd = new Date(newEvent.end_datetime || newEvent.start_datetime);
-    
+
     // 如果解析日期失败，返回空数组（不检查冲突）
     if (isNaN(newStart.getTime()) || isNaN(newEnd.getTime())) {
         console.warn('[冲突检测] 无效的日期时间，跳过冲突检测');
         return [];
     }
-    
+
     // 如果结束时间早于开始时间，默认设置为开始时间后1小时
     if (newEnd <= newStart) {
         newEnd.setTime(newStart.getTime() + 60 * 60 * 1000);
     }
-    
+
     return existingEvents.filter(event => {
         // 排除要更新的事件本身
         if (excludeEventId && event.id === excludeEventId) {
             return false;
         }
-        
+
         // 跳过已完成或已删除的事件
         if (event.completed || event.locally_deleted_at) {
             return false;
         }
-        
+
         const eventStart = new Date(event.start_datetime);
         const eventEnd = new Date(event.end_datetime || event.start_datetime);
-        
+
         // 如果现有事件的日期无效，跳过
         if (isNaN(eventStart.getTime()) || isNaN(eventEnd.getTime())) {
             return false;
         }
-        
+
         // 如果现有事件结束时间早于开始时间，默认设置为开始时间后1小时
         if (eventEnd <= eventStart) {
             eventEnd.setTime(eventStart.getTime() + 60 * 60 * 1000);
         }
-        
+
         // 检查时间重叠：新事件开始时间 < 现有事件结束时间 且 新事件结束时间 > 现有事件开始时间
         return newStart < eventEnd && newEnd > eventStart;
     });
@@ -1246,76 +1270,88 @@ function findConflictingEvents(newEvent, existingEvents, excludeEventId = null) 
 // --- 自然语言解析路由 --- (修改为调用 parseTextWithLLM)
 app.post('/events/parse-natural-language', authenticateUser, async (req, res) => {
     const { text } = req.body;
-    
+
     if (!text) {
         return res.status(400).json({ error: '缺少必要的文本参数。' });
     }
-    
+
     console.log(`[POST /events/parse] Route received text: "${text}"`);
-    
+
     try {
         // 获取用户认证信息
         const userId = getCurrentUserId(req);
         const authHeader = req.headers.authorization;
         const userToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
-        
-        // 调用重构后的 LLM 解析函数，传入用户认证信息
-        const parsedResult = await parseTextWithLLM(text, userId, userToken);
+        let { timezoneOffset } = req.body;
+
+        // 统一处理时区偏移，确保它是有效的数字
+        // 如果前端未传或传了null/undefined，使用服务器默认时区
+        let safeTimezoneOffset = new Date().getTimezoneOffset();
+        if (timezoneOffset !== null && timezoneOffset !== undefined) {
+            const parsedOffset = Number(timezoneOffset);
+            if (!isNaN(parsedOffset)) {
+                safeTimezoneOffset = parsedOffset;
+            }
+        }
+        console.log(`[POST /events/parse] Using timezone offset: ${safeTimezoneOffset} (Original: ${timezoneOffset})`);
+
+        // 调用重构后的 LLM 解析函数，传入用户认证信息和时区偏移
+        const parsedResult = await parseTextWithLLM(text, userId, userToken, safeTimezoneOffset);
 
         if (parsedResult) {
             // LLM 解析成功 (即使日期为 null)
             console.log("[POST /events/parse] LLM parse successful (may have null date):", parsedResult);
-            
+
             // 检查 LLM 是否找到了日期，如果没有，尝试正则 fallback
             if (parsedResult.start_datetime === null) {
-                 console.log("[POST /events/parse] LLM did not find date, trying regex fallback...");
-                 try {
-                     const parsedByRegex = parseByRegex(text);
-                     if (parsedByRegex.start_datetime) {
-                         console.log('[POST /events/parse] Fallback regex parsing successful.');
-                         // 合并正则日期和 LLM 的其他信息
-                         const finalResult = {
-                             ...parsedResult, // 保留 LLM 的 title, desc, location (如果存在)
-                             start_datetime: parsedByRegex.start_datetime,
-                             end_datetime: parsedByRegex.end_datetime,
-                             // 如果 LLM 没有 title，使用正则的
-                             title: parsedResult.title || parsedByRegex.title
-                         };
-                          console.log("[POST /events/parse] Merged LLM info with regex date:", finalResult);
-                         return res.status(200).json(finalResult);
-                     } else {
-                          console.log('[POST /events/parse] Fallback regex parsing also failed.');
-                          // LLM 和正则都失败，返回 LLM 的结果（包含 null 日期）或错误
-                          // return res.status(400).json({ error: '无法从文本中解析出有效的日期和时间。', parsedData: parsedResult });
-                         return res.status(200).json(parsedResult); // 返回LLM的结果（日期为null）
-                     }
-                 } catch (regexError) {
-                      console.error("[POST /events/parse] Error during fallback regex parsing:", regexError);
-                      // 正则出错，仍然返回 LLM 的结果
-                      return res.status(200).json(parsedResult);
-                 }
+                console.log("[POST /events/parse] LLM did not find date, trying regex fallback...");
+                try {
+                    const parsedByRegex = parseByRegex(text, safeTimezoneOffset);
+                    if (parsedByRegex.start_datetime) {
+                        console.log('[POST /events/parse] Fallback regex parsing successful.');
+                        // 合并正则日期和 LLM 的其他信息
+                        const finalResult = {
+                            ...parsedResult, // 保留 LLM 的 title, desc, location (如果存在)
+                            start_datetime: parsedByRegex.start_datetime,
+                            end_datetime: parsedByRegex.end_datetime,
+                            // 如果 LLM 没有 title，使用正则的
+                            title: parsedResult.title || parsedByRegex.title
+                        };
+                        console.log("[POST /events/parse] Merged LLM info with regex date:", finalResult);
+                        return res.status(200).json(finalResult);
+                    } else {
+                        console.log('[POST /events/parse] Fallback regex parsing also failed.');
+                        // LLM 和正则都失败，返回 LLM 的结果（包含 null 日期）或错误
+                        // return res.status(400).json({ error: '无法从文本中解析出有效的日期和时间。', parsedData: parsedResult });
+                        return res.status(200).json(parsedResult); // 返回LLM的结果（日期为null）
+                    }
+                } catch (regexError) {
+                    console.error("[POST /events/parse] Error during fallback regex parsing:", regexError);
+                    // 正则出错，仍然返回 LLM 的结果
+                    return res.status(200).json(parsedResult);
+                }
             } else {
-                 // LLM 成功解析出日期，直接返回结果
-                 return res.status(200).json(parsedResult);
+                // LLM 成功解析出日期，直接返回结果
+                return res.status(200).json(parsedResult);
             }
         } else {
             // parseTextWithLLM 返回 null，意味着 LLM 配置错误或 API 调用/解析失败
             console.log("[POST /events/parse] parseTextWithLLM returned null. Trying regex fallback...");
-             try {
-                 const parsedByRegex = parseByRegex(text);
-                 if (parsedByRegex.start_datetime) {
-                     console.log('[POST /events/parse] Fallback regex parsing successful after LLM failure.');
-                     return res.status(200).json(parsedByRegex);
-                 } else {
-                      console.log('[POST /events/parse] Fallback regex parsing also failed after LLM failure.');
-                      // LLM 失败，正则也失败，返回通用错误
-                      // 可以根据 parseTextWithLLM 失败的原因返回更具体的错误，但现在简化处理
-                      return res.status(500).json({ error: '无法使用 LLM 解析文本，且备用规则解析失败。请检查 LLM 配置或文本内容。' });
-                 }
-             } catch (regexError) {
-                  console.error("[POST /events/parse] Error during fallback regex parsing after LLM failure:", regexError);
-                  return res.status(500).json({ error: 'LLM 解析失败，且尝试备用规则解析时出错。' });
-             }
+            try {
+                const parsedByRegex = parseByRegex(text);
+                if (parsedByRegex.start_datetime) {
+                    console.log('[POST /events/parse] Fallback regex parsing successful after LLM failure.');
+                    return res.status(200).json(parsedByRegex);
+                } else {
+                    console.log('[POST /events/parse] Fallback regex parsing also failed after LLM failure.');
+                    // LLM 失败，正则也失败，返回通用错误
+                    // 可以根据 parseTextWithLLM 失败的原因返回更具体的错误，但现在简化处理
+                    return res.status(500).json({ error: '无法使用 LLM 解析文本，且备用规则解析失败。请检查 LLM 配置或文本内容。' });
+                }
+            } catch (regexError) {
+                console.error("[POST /events/parse] Error during fallback regex parsing after LLM failure:", regexError);
+                return res.status(500).json({ error: 'LLM 解析失败，且尝试备用规则解析时出错。' });
+            }
         }
 
     } catch (error) {
@@ -1329,11 +1365,11 @@ app.post('/events/parse-natural-language', authenticateUser, async (req, res) =>
 app.post('/events', authenticateUser, async (req, res) => {
     const newEvent = req.body;
     const userId = getCurrentUserId(req);
-    
+
     if (!newEvent || !newEvent.title) {
         return res.status(400).json({ error: '无效的事件格式。' });
     }
-    
+
     // 确保事件有唯一ID并添加用户ID
     const eventToSave = {
         ...newEvent,
@@ -1347,11 +1383,11 @@ app.post('/events', authenticateUser, async (req, res) => {
         caldav_etag: newEvent.caldav_etag || null // 保留已有的，否则为 null
         // -----------------------------------
     };
-    
+
     try {
         // 加载用户的事件数据
         let userEvents = await loadEvents(userId);
-        
+
         // 注意：根据新的需求，冲突检测只在前端显示，不再阻止事件创建
         // 如果需要日志记录，可以在这里检测冲突但不阻止创建
         if (!newEvent.force_create) {
@@ -1360,15 +1396,15 @@ app.post('/events', authenticateUser, async (req, res) => {
                 console.log(`[用户 ${req.user.username}] 检测到时间冲突，冲突事件数量: ${conflictingEvents.length}，但继续创建事件`);
             }
         }
-        
+
         // 添加新事件
         userEvents.push(eventToSave);
-        
+
         // 保存用户事件数据
         await saveEvents(userEvents, userId);
-        
+
         console.log(`[用户 ${req.user.username}] 事件已创建: "${eventToSave.title}" (${eventToSave.id})`);
-        
+
         // 立即触发CalDAV同步
         console.log(`[用户 ${req.user.username}] 开始触发事件创建后的立即CalDAV同步...`);
         triggerImmediateCalDavSync(userId, '本地事件创建').then(syncResult => {
@@ -1376,7 +1412,7 @@ app.post('/events', authenticateUser, async (req, res) => {
         }).catch(syncError => {
             console.error(`[用户 ${req.user.username}] 事件创建后立即同步失败:`, syncError);
         });
-        
+
         res.status(201).json(eventToSave);
     } catch (error) {
         console.error(`[用户 ${req.user.username}] 保存事件失败:`, error);
@@ -1387,7 +1423,7 @@ app.post('/events', authenticateUser, async (req, res) => {
 app.get('/events', authenticateUser, async (req, res) => {
     try {
         const userId = getCurrentUserId(req);
-        
+
         // 数据迁移已禁用 - 确保用户数据隔离
         // 每个用户只能看到自己的事件，不会从全局数据迁移
         console.log(`[用户 ${req.user.username}] 跳过数据迁移，确保用户数据隔离`);
@@ -1401,12 +1437,12 @@ app.get('/events', authenticateUser, async (req, res) => {
         } catch (cleanupError) {
             console.error(`[用户 ${req.user.username}] 清理迁移事件失败:`, cleanupError);
         }
-        
+
         const userEvents = await loadEvents(userId);
-        
+
         // 过滤掉已标记删除的事件（locally_deleted_at存在的事件）
         const visibleEvents = userEvents.filter(event => !event.locally_deleted_at);
-        
+
         console.log(`[用户 ${req.user.username}] 获取事件列表: ${visibleEvents.length} 个事件 (总计: ${userEvents.length}, 已隐藏删除: ${userEvents.length - visibleEvents.length})`);
         res.status(200).json(visibleEvents);
     } catch (error) {
@@ -1459,23 +1495,23 @@ app.put('/events/:id', authenticateUser, async (req, res) => {
                 console.error('[PUT /events/:id] 错误: 完整更新缺少 start_datetime');
                 return res.status(400).json({ error: '完整更新事件时必须提供 start_datetime。' });
             }
-            
+
             // 日期计算逻辑 (保持原有逻辑，但使用更新后的字段)
             let calculatedEndDate = null;
             try {
-                 // end_datetime 可能是 undefined，需要检查
-                 if (end_datetime !== undefined) {
-                     calculatedEndDate = end_datetime; // 如果提供了结束时间，直接使用
-                 } else if (originalEvent.end_datetime && originalEvent.start_datetime) {
-                      // 尝试根据原始时长计算
-                      const duration = new Date(originalEvent.end_datetime).getTime() - new Date(originalEvent.start_datetime).getTime();
-                      calculatedEndDate = new Date(new Date(start_datetime).getTime() + duration).toISOString();
-                 } else {
-                     // 如果无法计算，则默认1小时
-                     calculatedEndDate = new Date(new Date(start_datetime).getTime() + 3600 * 1000).toISOString();
-                     console.warn(`[PUT /events/:id] 为事件 ${eventId} 使用默认1小时时长`);
-                 }
-            } catch(dateError) {
+                // end_datetime 可能是 undefined，需要检查
+                if (end_datetime !== undefined) {
+                    calculatedEndDate = end_datetime; // 如果提供了结束时间，直接使用
+                } else if (originalEvent.end_datetime && originalEvent.start_datetime) {
+                    // 尝试根据原始时长计算
+                    const duration = new Date(originalEvent.end_datetime).getTime() - new Date(originalEvent.start_datetime).getTime();
+                    calculatedEndDate = new Date(new Date(start_datetime).getTime() + duration).toISOString();
+                } else {
+                    // 如果无法计算，则默认1小时
+                    calculatedEndDate = new Date(new Date(start_datetime).getTime() + 3600 * 1000).toISOString();
+                    console.warn(`[PUT /events/:id] 为事件 ${eventId} 使用默认1小时时长`);
+                }
+            } catch (dateError) {
                 console.error(`[PUT /events/:id] 计算结束日期时出错，事件 ${eventId}:`, dateError);
                 calculatedEndDate = new Date(new Date(start_datetime).getTime() + 3600 * 1000).toISOString();
                 console.warn(`[PUT /events/:id] 由于计算错误，为事件 ${eventId} 使用默认1小时时长`);
@@ -1515,7 +1551,7 @@ app.put('/events/:id', authenticateUser, async (req, res) => {
         await saveEvents(userEvents, userId);
         console.log(`[PUT /events/:id] 成功保存用户事件数据`);
         console.log(`[用户 ${req.user.username}] 事件已更新: "${updatedEvent.title}" (ID: ${eventId})`);
-        
+
         // 确保返回的事件包含正确的 completed 状态 (从 updatedEvent 获取)
         res.status(200).json(updatedEvent);
     } catch (error) {
@@ -1529,7 +1565,7 @@ app.put('/events/:id', authenticateUser, async (req, res) => {
 app.delete('/events/:id', authenticateUser, async (req, res) => {
     const eventId = req.params.id;
     const userId = getCurrentUserId(req);
-    
+
     console.log(`[DELETE /events/:id] 用户 ${req.user.username} 请求删除事件 ID: ${eventId}`);
 
     try {
@@ -1567,7 +1603,7 @@ app.delete('/events/:id', authenticateUser, async (req, res) => {
 
             await saveEvents(userEvents, userId);
             console.log(`[DELETE /events/:id] 本地删除后成功保存用户事件数据`);
-            res.status(200).json({ message: `事件 '${deletedEvent.title}' (ID: ${eventId}) 已成功删除。` }); 
+            res.status(200).json({ message: `事件 '${deletedEvent.title}' (ID: ${eventId}) 已成功删除。` });
         }
     } catch (error) {
         console.error(`[DELETE /events/:id] 用户 ${req.user.username} 删除事件失败:`, error);
@@ -1601,29 +1637,29 @@ initializeData().then(() => {
 
     // 每小时执行一次 CalDAV 同步 (例如 H:05, 即每小时的第5分钟, '5 * * * *')
     cron.schedule('5 * * * *', async () => {
-         console.log('[Cron] Triggering scheduled CalDAV sync for default user...');
-         
-         try {
-             // 为默认用户执行CalDAV同步（TideLog主要是单用户系统）
-             const defaultUserId = newSettingsService.defaultUserId;
-             
-             // 获取默认用户的CalDAV设置
-             const userCalDAVSettings = newSettingsService.getCalDAVSettings(defaultUserId);
-             
-             // 检查是否配置了CalDAV
-             if (userCalDAVSettings && userCalDAVSettings.username && userCalDAVSettings.password && userCalDAVSettings.serverUrl) {
-                 console.log(`[Cron CalDAV] 为默认用户执行CalDAV同步...`);
-                 const syncResult = await performCalDavSyncForUser(defaultUserId);
-                 console.log(`[Cron CalDAV] 默认用户同步完成:`, syncResult.message);
-             } else {
-                 console.log(`[Cron CalDAV] 跳过定时同步，CalDAV设置未配置`);
-             }
-             
-         } catch (error) {
-             console.error('[Cron] CalDAV定时同步过程中发生错误:', error);
-         }
+        console.log('[Cron] Triggering scheduled CalDAV sync for default user...');
+
+        try {
+            // 为默认用户执行CalDAV同步（TideLog主要是单用户系统）
+            const defaultUserId = newSettingsService.defaultUserId;
+
+            // 获取默认用户的CalDAV设置
+            const userCalDAVSettings = newSettingsService.getCalDAVSettings(defaultUserId);
+
+            // 检查是否配置了CalDAV
+            if (userCalDAVSettings && userCalDAVSettings.username && userCalDAVSettings.password && userCalDAVSettings.serverUrl) {
+                console.log(`[Cron CalDAV] 为默认用户执行CalDAV同步...`);
+                const syncResult = await performCalDavSyncForUser(defaultUserId);
+                console.log(`[Cron CalDAV] 默认用户同步完成:`, syncResult.message);
+            } else {
+                console.log(`[Cron CalDAV] 跳过定时同步，CalDAV设置未配置`);
+            }
+
+        } catch (error) {
+            console.error('[Cron] CalDAV定时同步过程中发生错误:', error);
+        }
     });
-    
+
     console.log('\n定时同步任务已设置:');
     console.log(' - IMAP Sync: 每 30 分钟');
     console.log(' - CalDAV Sync: 每小时第 5 分钟');
@@ -1639,7 +1675,7 @@ initializeData().then(() => {
 async function triggerImmediateCalDavSync(userId, eventContext = '事件创建') {
     try {
         console.log(`[立即同步] ${eventContext}后触发CalDAV同步，用户: ${userId}`);
-        
+
         // 获取用户的CalDAV设置
         console.log(`[立即同步] 正在获取用户 ${userId} 的CalDAV设置...`);
         const userCalDAVSettings = newSettingsService.getCalDAVSettings(userId);
@@ -1649,7 +1685,7 @@ async function triggerImmediateCalDavSync(userId, eventContext = '事件创建')
             hasServerUrl: !!userCalDAVSettings?.serverUrl,
             serverUrl: userCalDAVSettings?.serverUrl
         });
-        
+
         // 检查是否配置了CalDAV
         if (userCalDAVSettings && userCalDAVSettings.username && userCalDAVSettings.password && userCalDAVSettings.serverUrl) {
             console.log(`[立即同步] 检测到完整CalDAV配置，开始同步到 ${userCalDAVSettings.serverUrl}`);
@@ -1672,20 +1708,20 @@ let isImapSyncRunning = false;
 async function performImapSync(userId = null, userToken = null, userImapSettings = null) {
     console.log('[performImapSync] Starting IMAP sync process...');
     console.log(`[performImapSync] 用户ID: ${userId}, 有token: ${!!userToken}`);
-    
+
     if (isImapSyncRunning) {
         console.log('[performImapSync] IMAP sync is already running. Skipping.');
         return { message: 'IMAP Sync is already in progress.', eventCount: 0 };
     }
 
     isImapSyncRunning = true;
-    
+
     // 设置同步超时保护（10分钟后自动释放锁）
     const syncTimeout = setTimeout(() => {
         console.warn('[performImapSync] IMAP同步超时，自动释放锁');
         isImapSyncRunning = false;
     }, 10 * 60 * 1000); // 10分钟
-    
+
     // 使用传入的用户设置，如果没有则回退到全局设置
     const effectiveImapSettings = userImapSettings || imapSettings;
     console.log('[performImapSync] 使用IMAP设置:', {
@@ -1693,7 +1729,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
         host: effectiveImapSettings.imapHost,
         hasPassword: !!effectiveImapSettings.password
     });
-    
+
     const imapConfig = {
         user: effectiveImapSettings.email,
         password: effectiveImapSettings.password,
@@ -1716,7 +1752,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
     }
 
     // 定义 imap 辅助函数 (connect, open, search, fetch, etc.)
-    const imapConnect = () => { 
+    const imapConnect = () => {
         return new Promise((resolve, reject) => {
             imap.once('ready', () => {
                 console.log('[performImapSync] IMAP connection established successfully.');
@@ -1729,7 +1765,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
             imap.connect();
         });
     };
-    const openMailbox = (folderName) => { /* ... (保持原样) ... */  
+    const openMailbox = (folderName) => { /* ... (保持原样) ... */
         return new Promise((resolve, reject) => {
             imap.openBox(folderName, false, (err, box) => {
                 if (err) {
@@ -1747,12 +1783,12 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
             // 计算3天前的日期
             const threeDaysAgo = new Date();
             threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-            
+
             // IMAP搜索条件：未读且最近3天内的邮件
             const criteria = ['UNSEEN', ['SINCE', threeDaysAgo]];
-            
+
             console.log(`[performImapSync] 搜索条件：未读且${threeDaysAgo.toISOString().split('T')[0]}以后的邮件`);
-            
+
             imap.search(criteria, (err, results) => {
                 if (err) {
                     console.error(`[performImapSync] Error searching UNSEEN+RECENT in ${folderName}:`, err);
@@ -1764,20 +1800,20 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
             });
         });
     };
-    const fetchEmails = (results) => {  
+    const fetchEmails = (results) => {
         return new Promise((resolve, reject) => {
             if (results.length === 0) {
                 resolve([]);
                 return;
             }
-            
+
             // 去重UID数组，避免重复处理
             const uniqueResults = [...new Set(results)];
             console.log(`[fetchEmails] 原始UID数组长度: ${results.length}, 去重后: ${uniqueResults.length}`);
             if (results.length !== uniqueResults.length) {
                 console.log(`[fetchEmails] 发现重复UID，原始: [${results.join(', ')}], 去重后: [${uniqueResults.join(', ')}]`);
             }
-            
+
             // 设置超时保护（2分钟，缩短超时时间）
             const fetchTimeout = setTimeout(() => {
                 console.error(`[fetchEmails] 获取邮件超时，批次大小: ${uniqueResults.length}`);
@@ -1787,19 +1823,19 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
             const emails = [];
             let completed = 0;
             const total = uniqueResults.length;
-            
-            const fetch = imap.fetch(uniqueResults, { 
+
+            const fetch = imap.fetch(uniqueResults, {
                 bodies: '',
                 struct: true,
                 markSeen: false
             });
-            
+
             console.log(`[fetchEmails] 开始获取 ${total} 封去重邮件...`);
 
             fetch.on('message', (msg, seqno) => {
                 console.log(`[fetchEmails] 开始处理邮件 seqno: ${seqno}`);
                 const email = { uid: null, subject: '', from: null, date: null, text: '', html: '', attachments: [], isParsed: false };
-                
+
                 msg.on('body', (stream, info) => {
                     simpleParser(stream, (err, parsed) => {
                         if (err) {
@@ -1807,9 +1843,9 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                             email.isParsed = true;
                             return;
                         }
-                        
-                        
-                        
+
+
+
                         email.subject = parsed.subject || '';
                         email.from = parsed.from;
                         email.date = parsed.date;
@@ -1842,7 +1878,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                             emails.push(email);
                             completed++;
                             console.log(`[fetchEmails] 进度: ${completed}/${total} 邮件处理完成`);
-                            
+
                             // 检查是否所有邮件都处理完成
                             if (completed === total) {
                                 console.log(`[performImapSync] Finished fetching ${emails.length} emails.`);
@@ -1854,7 +1890,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                             setTimeout(waitForParsing, 10);
                         }
                     };
-                    
+
                     waitForParsing();
                 });
             });
@@ -1869,7 +1905,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
     };
     const extractCalendarEvents = async (emails, userId = null, userToken = null) => {
         const eventsFound = [];
-        
+
         // 添加调试信息：显示所有收到的邮件
         console.log(`[extractCalendarEvents] Processing ${emails.length} emails:`);
         emails.forEach((email, index) => {
@@ -1891,16 +1927,16 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                     senderAddress = emailMatch ? emailMatch[1].toLowerCase() : '';
                 }
             }
-            
+
             console.log(`[extractCalendarEvents] Email ${index + 1}: UID ${email.uid}, Subject: "${email.subject}", Sender: ${senderAddress}`);
-            
-            
+
+
         });
-        
+
         // --- 使用动态加载的白名单 ---
         const currentAllowlist = (imapFilterSettings && Array.isArray(imapFilterSettings.sender_allowlist))
-                                 ? imapFilterSettings.sender_allowlist
-                                 : [];
+            ? imapFilterSettings.sender_allowlist
+            : [];
         console.log(`[extractCalendarEvents] Current allowlist:`, currentAllowlist);
         // ---------------------------
 
@@ -1909,29 +1945,29 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
             if (email.attachments && email.attachments.length > 0) {
                 const calendarAttachments = email.attachments.filter(att => att.isCalendar && att.content);
                 for (const attachment of calendarAttachments) {
-                     try {
+                    try {
                         // ... (ICS 解析和增强重复检查逻辑保持不变) ...
                         const parsedIcs = ICAL.parseICS(attachment.content);
                         for (const key in parsedIcs) {
                             if (parsedIcs[key].type === 'VEVENT') {
                                 const vevent = parsedIcs[key];
-                                const eventUid = vevent.uid || `${email.uid}_${attachment.filename || 'cal'}_${key}`; 
+                                const eventUid = vevent.uid || `${email.uid}_${attachment.filename || 'cal'}_${key}`;
                                 const recurrenceId = vevent.recurrenceid ? new Date(vevent.recurrenceid).toISOString() : null;
                                 const uniqueId = recurrenceId ? `${eventUid}_${recurrenceId}` : eventUid;
 
                                 const eventStartDate = vevent.start ? new Date(vevent.start) : null; // 移动到检查前获取，以便用于内容检查
-                                
-                                const isDuplicateICS = eventsDb.some(existingEvent => 
-                                    existingEvent.id === uniqueId || 
+
+                                const isDuplicateICS = eventsDb.some(existingEvent =>
+                                    existingEvent.id === uniqueId ||
                                     (existingEvent.caldav_uid && vevent.uid && existingEvent.caldav_uid === vevent.uid) ||
                                     (eventStartDate && existingEvent.title === (vevent.summary || '无标题事件 (来自邮件)') && existingEvent.start_datetime === eventStartDate.toISOString())
                                 );
-                                
+
                                 if (isDuplicateICS) {
                                     console.log(`[extractCalendarEvents] Skipping duplicate ICS event found by enhanced check. ID: ${uniqueId}, Title: ${vevent.summary}`);
-                                    continue; 
+                                    continue;
                                 }
-                                
+
                                 const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600 * 1000) : null);
 
                                 if (eventStartDate && eventEndDate && !isNaN(eventStartDate) && !isNaN(eventEndDate)) {
@@ -1960,7 +1996,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                     }
                 }
             }
-            
+
             // --- LLM 解析邮件正文逻辑 (智能分析策略) ---
             // 改进发件人地址获取逻辑，处理不同格式
             let senderAddress = '';
@@ -1976,7 +2012,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                     senderAddress = emailMatch ? emailMatch[1].toLowerCase() : '';
                 }
             }
-            
+
             // 首先检查白名单策略：只有白名单中的发件人邮件才会被分析
             if (!senderAddress || !currentAllowlist.includes(senderAddress)) {
                 console.log(`[extractCalendarEvents] Skipping LLM parsing for email UID ${email.uid} from sender: ${senderAddress} (sender not in allowlist).`);
@@ -1984,32 +2020,32 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                 // 检查是否已经分析过这封邮件（防重复分析）
                 const analysisKey = `imap_llm_${email.uid}`;
                 const alreadyAnalyzed = eventsDb.some(e => e.source === 'imap_llm_body_parse' && e.analysis_key === analysisKey);
-                
+
                 if (alreadyAnalyzed) {
                     console.log(`[extractCalendarEvents] Skipping email UID ${email.uid} - already analyzed (analysis_key: ${analysisKey}).`);
                 } else {
                     console.log(`[extractCalendarEvents] Analyzing email UID ${email.uid} from sender: ${senderAddress} (sender in allowlist).`);
-                    
-                    
-                    
+
+
+
                     // 在LLM调用之前先检查是否已经有相同的事件
                     const emailBody = email.text || (email.html ? require('html-to-text').htmlToText(email.html) : '');
                     const emailSubject = email.subject || '';
                     // 将标题和正文合并进行分析
                     const textToParse = `${emailSubject}\n${emailBody}`.trim();
-                    
-                    
-                    
+
+
+
                     if (textToParse && textToParse.trim().length > 5) {
                         console.log(`[extractCalendarEvents] Checking for existing events before LLM parsing for email UID ${email.uid}...`);
-                        
+
                         // 简单的重复检查：基于邮件主题和UID
-                        const existingSimilar = eventsDb.find(e => 
-                            e.source === 'imap_llm_body_parse' && 
-                            (e.analysis_key === analysisKey || 
-                             (e.title && email.subject && e.title.includes(email.subject.substring(0, 20))))
+                        const existingSimilar = eventsDb.find(e =>
+                            e.source === 'imap_llm_body_parse' &&
+                            (e.analysis_key === analysisKey ||
+                                (e.title && email.subject && e.title.includes(email.subject.substring(0, 20))))
                         );
-                        
+
                         if (existingSimilar) {
                             console.log(`[extractCalendarEvents] Skipping LLM call for email UID ${email.uid} - similar event already exists: "${existingSimilar.title}"`);
                         } else {
@@ -2021,20 +2057,20 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                                     // ... (LLM 结果处理和增强重复检查逻辑保持不变) ...
                                     const llmEventTitle = llmResult.title || email.subject || '来自邮件的事件';
                                     const llmEventStart = llmResult.start_datetime;
-                                    
+
                                     const llmEventUidBase = `llm_${email.uid}_${new Date(llmEventStart).getTime()}`;
                                     let llmUniqueId = llmEventUidBase;
                                     let counter = 0;
-                                    while(eventsDb.some(e => e.id === llmUniqueId) || eventsFound.some(ef => ef.id === llmUniqueId)) { 
+                                    while (eventsDb.some(e => e.id === llmUniqueId) || eventsFound.some(ef => ef.id === llmUniqueId)) {
                                         counter++;
                                         llmUniqueId = `${llmEventUidBase}_${counter}`;
                                     }
 
-                                    const isDuplicateLLM = eventsDb.some(existingEvent => 
-                                        existingEvent.id === llmUniqueId || 
+                                    const isDuplicateLLM = eventsDb.some(existingEvent =>
+                                        existingEvent.id === llmUniqueId ||
                                         (existingEvent.title === llmEventTitle && existingEvent.start_datetime === llmEventStart)
-                                    ) || eventsFound.some(ef => 
-                                        ef.id === llmUniqueId || 
+                                    ) || eventsFound.some(ef =>
+                                        ef.id === llmUniqueId ||
                                         (ef.title === llmEventTitle && ef.start_datetime === llmEventStart)
                                     );
 
@@ -2058,7 +2094,7 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                                     } else {
                                         console.log(`[extractCalendarEvents] Skipping duplicate LLM-parsed event found by enhanced check. Title: ${llmEventTitle}, Start: ${llmEventStart}`);
                                     }
-                                } else if(llmResult) {
+                                } else if (llmResult) {
                                     console.log(`[extractCalendarEvents] LLM parsed email UID ${email.uid} but no valid start date found.`);
                                 } else {
                                     console.log(`[extractCalendarEvents] LLM parsing failed or returned null for email UID ${email.uid}.`);
@@ -2089,15 +2125,15 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
             const searchResults = await searchUnseenEmails(folderName);
             if (searchResults.length > 0) {
                 console.log(`[performImapSync] Fetching ${searchResults.length} UNSEEN messages...`);
-                
+
                 // 分批处理邮件，避免一次性加载太多
                 const batchSize = 10; // 每批处理10封邮件
                 let allEmails = [];
-                
+
                 for (let i = 0; i < searchResults.length; i += batchSize) {
                     const batch = searchResults.slice(i, i + batchSize);
-                    console.log(`[performImapSync] 处理批次 ${Math.floor(i/batchSize) + 1}/${Math.ceil(searchResults.length/batchSize)}: ${batch.length} 封邮件`);
-                    
+                    console.log(`[performImapSync] 处理批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(searchResults.length / batchSize)}: ${batch.length} 封邮件`);
+
                     try {
                         const batchEmails = await fetchEmails(batch);
                         allEmails = [...allEmails, ...batchEmails];
@@ -2108,16 +2144,16 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                         continue;
                     }
                 }
-                
+
                 const emails = allEmails;
-                 console.log(`[performImapSync] Extracting events from ${emails.length} fetched messages...`);
+                console.log(`[performImapSync] Extracting events from ${emails.length} fetched messages...`);
                 const newEvents = await extractCalendarEvents(emails, userId, userToken);
                 if (newEvents.length > 0) {
                     syncedEvents = [...syncedEvents, ...newEvents];
-                     console.log(`[performImapSync] Extracted ${newEvents.length} events from ${folderName}.`);
+                    console.log(`[performImapSync] Extracted ${newEvents.length} events from ${folderName}.`);
                 }
             } else {
-                 console.log(`[performImapSync] No UNSEEN messages found in ${folderName} by search.`);
+                console.log(`[performImapSync] No UNSEEN messages found in ${folderName} by search.`);
             }
         }
 
@@ -2129,12 +2165,12 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
             // TODO: Add content-based duplicate check here (isLikelyDuplicate)
             if (uniqueNewEvents.length > 0) {
                 eventsDb = [...eventsDb, ...uniqueNewEvents];
-                
+
                 // 根据用户ID保存到正确的位置
                 if (userId) {
                     await saveEvents(eventsDb, userId);
                     console.log(`[performImapSync] 为用户 ${userId} 保存了 ${uniqueNewEvents.length} 个新事件`);
-                    
+
                     // 立即触发CalDAV同步
                     triggerImmediateCalDavSync(userId, 'IMAP智能事件创建').catch(syncError => {
                         console.error(`[performImapSync] IMAP事件创建后立即同步失败:`, syncError);
@@ -2149,18 +2185,18 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
                 isImapSyncRunning = false;
                 return { message: `IMAP Sync successful. Added ${uniqueNewEvents.length} new events.`, eventCount: uniqueNewEvents.length };
             } else {
-                 console.log('[performImapSync] All extracted events already exist.');
-                 try { imap.end(); console.log('[performImapSync] IMAP connection closed.'); } catch (e) { console.error('[performImapSync] Error closing IMAP:', e); }
-                 clearTimeout(syncTimeout); // 清除超时定时器
-                 isImapSyncRunning = false;
-                 return { message: 'IMAP Sync complete. No new events found.', eventCount: 0 };
+                console.log('[performImapSync] All extracted events already exist.');
+                try { imap.end(); console.log('[performImapSync] IMAP connection closed.'); } catch (e) { console.error('[performImapSync] Error closing IMAP:', e); }
+                clearTimeout(syncTimeout); // 清除超时定时器
+                isImapSyncRunning = false;
+                return { message: 'IMAP Sync complete. No new events found.', eventCount: 0 };
             }
         } else {
-             console.log('[performImapSync] No events extracted from emails.');
-             try { imap.end(); console.log('[performImapSync] IMAP connection closed.'); } catch (e) { console.error('[performImapSync] Error closing IMAP:', e); }
-             clearTimeout(syncTimeout); // 清除超时定时器
-             isImapSyncRunning = false;
-             return { message: 'IMAP Sync complete. No events extracted.', eventCount: 0 };
+            console.log('[performImapSync] No events extracted from emails.');
+            try { imap.end(); console.log('[performImapSync] IMAP connection closed.'); } catch (e) { console.error('[performImapSync] Error closing IMAP:', e); }
+            clearTimeout(syncTimeout); // 清除超时定时器
+            isImapSyncRunning = false;
+            return { message: 'IMAP Sync complete. No events extracted.', eventCount: 0 };
         }
 
     } catch (error) {
@@ -2177,17 +2213,17 @@ async function performImapSync(userId = null, userToken = null, userImapSettings
 // --- 用户特定的IMAP同步函数 ---
 async function performImapSyncForUser(userImapSettings, userId) {
     console.log(`[performImapSyncForUser] Starting IMAP sync for user ${userId}...`);
-    
+
     // 检查IMAP设置
     if (!userImapSettings || !userImapSettings.email || !userImapSettings.password || !userImapSettings.imapHost) {
         console.error(`[performImapSyncForUser] IMAP settings not fully configured for user ${userId}.`);
         return { message: 'IMAP settings not fully configured.', eventCount: -1, error: true };
     }
-    
+
     console.log(`[performImapSyncForUser] Attempting sync for user ${userId}: ${userImapSettings.email}`);
-    
+
     try {
-        const imapConfig = { 
+        const imapConfig = {
             user: userImapSettings.email,
             password: userImapSettings.password,
             host: userImapSettings.imapHost,
@@ -2197,89 +2233,89 @@ async function performImapSyncForUser(userImapSettings, userId) {
         };
         const imap = new Imap(imapConfig);
         let syncedEvents = [];
-        
+
         // 加载用户事件
         let userEvents = await loadEvents(userId);
-        
+
         // 定义 imap 辅助函数
-        const imapConnect = () => { 
+        const imapConnect = () => {
             return new Promise((resolve, reject) => {
                 imap.once('error', reject);
                 imap.once('ready', resolve);
                 imap.connect();
             });
         };
-        
+
         const openMailbox = (folderName) => {
-             return new Promise((resolve, reject) => {
+            return new Promise((resolve, reject) => {
                 console.log(`[performImapSyncForUser] Opening mailbox: ${folderName}`);
-                 imap.openBox(folderName, false, (err, box) => {
-                     if (err) {
-                         console.error(`[performImapSyncForUser] Failed to open ${folderName}: ${err.message}`);
-                         resolve(null); 
-                     } else {
-                          console.log(`[performImapSyncForUser] Opened ${folderName}: ${box.messages.total} total, ${box.messages.new} new`);
-                         resolve(box);
-                     }
-                 });
-             });
+                imap.openBox(folderName, false, (err, box) => {
+                    if (err) {
+                        console.error(`[performImapSyncForUser] Failed to open ${folderName}: ${err.message}`);
+                        resolve(null);
+                    } else {
+                        console.log(`[performImapSyncForUser] Opened ${folderName}: ${box.messages.total} total, ${box.messages.new} new`);
+                        resolve(box);
+                    }
+                });
+            });
         };
-        
+
         const searchUnseenEmails = (folderName) => {
-             return new Promise((resolve, reject) => {
-                 console.log(`[performImapSyncForUser] Searching UNSEEN in ${folderName}...`);
-                 try {
-                     imap.search(['UNSEEN'], (err, results) => {
-                         if (err) {
-                             console.error(`[performImapSyncForUser] Failed to search UNSEEN in ${folderName}: ${err.message}`);
-                             resolve([]);
-                         } else if (!results || results.length === 0) {
-                              console.log(`[performImapSyncForUser] No UNSEEN messages found in ${folderName}.`);
-                             resolve([]);
-                         } else {
-                             console.log(`[performImapSyncForUser] Found ${results.length} UNSEEN messages in ${folderName}.`);
-                             resolve(results);
-                         }
-                     });
-                 } catch (error) {
-                     console.error(`[performImapSyncForUser] Error during UNSEEN search in ${folderName}:`, error);
-                     resolve([]);
-                 }
-             });
+            return new Promise((resolve, reject) => {
+                console.log(`[performImapSyncForUser] Searching UNSEEN in ${folderName}...`);
+                try {
+                    imap.search(['UNSEEN'], (err, results) => {
+                        if (err) {
+                            console.error(`[performImapSyncForUser] Failed to search UNSEEN in ${folderName}: ${err.message}`);
+                            resolve([]);
+                        } else if (!results || results.length === 0) {
+                            console.log(`[performImapSyncForUser] No UNSEEN messages found in ${folderName}.`);
+                            resolve([]);
+                        } else {
+                            console.log(`[performImapSyncForUser] Found ${results.length} UNSEEN messages in ${folderName}.`);
+                            resolve(results);
+                        }
+                    });
+                } catch (error) {
+                    console.error(`[performImapSyncForUser] Error during UNSEEN search in ${folderName}:`, error);
+                    resolve([]);
+                }
+            });
         };
-        
+
         // IMAP连接和邮件处理逻辑
         await imapConnect();
         console.log(`[performImapSyncForUser] Connected to IMAP server for user ${userId}`);
-        
+
         const box = await openMailbox('INBOX');
         if (!box) {
             imap.end();
             return { message: 'Failed to open INBOX', eventCount: -1, error: true };
         }
-        
+
         const unseenResults = await searchUnseenEmails('INBOX');
         if (unseenResults.length === 0) {
             imap.end();
             console.log(`[performImapSyncForUser] No new emails found for user ${userId}`);
             return { message: 'No new emails found', eventCount: 0 };
         }
-        
+
         console.log(`[performImapSyncForUser] Processing ${unseenResults.length} emails for user ${userId}...`);
         // 这里需要实现邮件获取和AI分析的逻辑
         // 简化版本：返回成功状态
-        
+
         imap.end();
-        
+
         // 保存用户事件
         await saveEvents(userEvents, userId);
-        
+
         console.log(`[performImapSyncForUser] IMAP sync completed for user ${userId}`);
-        return { 
-            message: `IMAP sync completed for ${userImapSettings.email}. Found ${unseenResults.length} new emails.`, 
-            eventCount: 0 
+        return {
+            message: `IMAP sync completed for ${userImapSettings.email}. Found ${unseenResults.length} new emails.`,
+            eventCount: 0
         };
-        
+
     } catch (error) {
         console.error(`[performImapSyncForUser] Error during IMAP sync for user ${userId}:`, error);
         return { message: `IMAP Sync failed: ${error.message}`, eventCount: -1, error: true };
@@ -2291,24 +2327,24 @@ let isCalDavSyncRunning = false;
 // --- 用户特定的CalDAV同步函数 ---
 async function performCalDavSyncForUser(userId) {
     console.log(`[performCalDavSyncForUser] Starting CalDAV sync for user ${userId}...`);
-    
+
     try {
         // 加载用户特定的CalDAV设置（使用新的设置服务）
         console.log(`[performCalDavSyncForUser] 使用新设置服务加载CalDAV设置，用户ID: ${userId}`);
         const userCalDAVSettings = await newSettingsService.getCalDAVSettings(userId);
         console.log(`[performCalDavSyncForUser] 加载到的CalDAV设置:`, userCalDAVSettings);
-        
+
         // 检查CalDAV设置是否已配置
         if (!userCalDAVSettings || !userCalDAVSettings.username || !userCalDAVSettings.password || !userCalDAVSettings.serverUrl) {
             console.error(`[performCalDavSyncForUser] CalDAV settings not fully configured for user ${userId}.`);
             return { message: 'CalDAV设置未完全配置，请先完成CalDAV服务器设置。', eventCount: -1, error: true };
         }
-        
+
         console.log(`[performCalDavSyncForUser] Syncing for user ${userId}: ${userCalDAVSettings.username}`);
-        
+
         // 加载用户事件
         let userEvents = await loadEvents(userId);
-        
+
         // 调用相应的CalDAV同步逻辑
         let syncResult;
         if (userCalDAVSettings.serverUrl && userCalDAVSettings.serverUrl.includes('dav.qq.com')) {
@@ -2316,9 +2352,9 @@ async function performCalDavSyncForUser(userId) {
         } else {
             syncResult = await performGenericCalDavSyncForUser(userCalDAVSettings, userEvents, userId);
         }
-        
+
         return syncResult;
-        
+
     } catch (error) {
         console.error(`[performCalDavSyncForUser] Error during CalDAV sync for user ${userId}:`, error);
         return { message: `CalDAV Sync failed: ${error.message}`, eventCount: -1, error: true };
@@ -2328,12 +2364,12 @@ async function performCalDavSyncForUser(userId) {
 // --- 用户特定的QQ CalDAV同步函数 ---
 async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId) {
     console.log(`[performQQCalDavSyncForUser] Starting QQ CalDAV sync for user ${userId}`);
-    
+
     try {
         let targetServerUrl = userCalDAVSettings.serverUrl;
         if (!targetServerUrl.startsWith('http')) targetServerUrl = 'https://' + targetServerUrl;
         if (!targetServerUrl.endsWith('/')) targetServerUrl += '/';
-        
+
         console.log(`[performQQCalDavSyncForUser] 准备连接CalDAV服务器: ${targetServerUrl}`);
         console.log(`[performQQCalDavSyncForUser] 用户名: ${userCalDAVSettings.username}`);
         console.log(`[performQQCalDavSyncForUser] 密码长度: ${userCalDAVSettings.password ? userCalDAVSettings.password.length : 0}`);
@@ -2349,15 +2385,15 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
         });
 
         await client.login();
-        console.log(`[performQQCalDavSyncForUser] Login successful for user ${userId}`); 
-        
+        console.log(`[performQQCalDavSyncForUser] Login successful for user ${userId}`);
+
         const calendars = await client.fetchCalendars();
         if (calendars.length === 0) {
             return { message: 'No calendars found on server.', eventCount: 0 };
         }
-        
+
         let targetCalendar = calendars.find(cal => cal.displayName === 'Calendar' || cal.displayName === '日历') || calendars[0];
-        
+
         // 获取同步时间范围
         const startDate = new Date();
         startDate.setMonth(startDate.getMonth() - 1); // 1个月前
@@ -2366,8 +2402,8 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
 
         const calendarObjects = await client.fetchCalendarObjects({
             calendar: targetCalendar,
-            calendarData: { 
-                compFilter: { 
+            calendarData: {
+                compFilter: {
                     attrs: { name: 'VCALENDAR' },
                     compFilter: {
                         attrs: { name: 'VEVENT' },
@@ -2376,19 +2412,19 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                             end: endDate.toISOString(),
                         },
                     },
-                 }
+                }
             }
         });
-        
-        console.log(`[performQQCalDavSyncForUser] Fetched ${calendarObjects.length} calendar objects for user ${userId}`); 
+
+        console.log(`[performQQCalDavSyncForUser] Fetched ${calendarObjects.length} calendar objects for user ${userId}`);
 
         // 处理从服务器获取的事件
         const newOrUpdatedEvents = [];
         let addedFromServerCount = 0;
-        
+
         for (const obj of calendarObjects) {
             if (!obj.data) continue;
-            
+
             try {
                 const parsedEvents = ical.parseICS(obj.data);
                 for (const key in parsedEvents) {
@@ -2396,9 +2432,9 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                         const vevent = parsedEvents[key];
                         const eventUid = vevent.uid || obj.url;
                         const uniqueId = eventUid;
-                        
+
                         const eventStartDate = vevent.start ? new Date(vevent.start) : null;
-                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600*1000) : null);
+                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600 * 1000) : null);
 
                         if (eventStartDate && eventEndDate && !isNaN(eventStartDate) && !isNaN(eventEndDate)) {
                             const eventData = {
@@ -2418,7 +2454,7 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                                 needs_caldav_push: false,
                                 userId: userId
                             };
-                            
+
                             // 检查本地是否存在此事件
                             const existingLocalEventIndex = userEvents.findIndex(e => e.id === uniqueId);
                             if (existingLocalEventIndex === -1) {
@@ -2432,16 +2468,16 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                 console.error(`[performQQCalDavSyncForUser] Error parsing ICS for ${obj.url} (user ${userId}):`, parseError);
             }
         }
-        
+
         // 合并新增的事件
         if (newOrUpdatedEvents.length > 0) {
             userEvents = [...userEvents, ...newOrUpdatedEvents];
         }
-        
+
         // 新增：检测并移除在QQ服务器上已删除的本地事件
         let removedLocallyCount = 0;
         const eventsFromServerMap = new Map();
-        
+
         // 构建服务器事件映射（复用已经解析的数据）
         for (const obj of calendarObjects) {
             if (!obj.data) continue;
@@ -2458,7 +2494,7 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                 // 忽略解析错误，继续处理其他事件
             }
         }
-        
+
         // 检查本地的CalDAV事件是否在服务器上仍然存在
         const originalUserEventsCount = userEvents.length;
         userEvents = userEvents.filter(localEvent => {
@@ -2473,11 +2509,11 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
             }
             return true; // 保留其他事件
         });
-        
+
         if (removedLocallyCount > 0) {
             console.log(`[performQQCalDavSyncForUser] 已删除 ${removedLocallyCount} 个在QQ日历上不存在的本地事件`);
         }
-        
+
         // 新增：处理需要在服务器上删除的事件
         let deletedOnServerCount = 0;
         const eventsMarkedForDeletion = userEvents.filter(e => e.needs_caldav_delete === true && e.caldav_url && e.source === 'caldav_sync_tsdav');
@@ -2487,14 +2523,14 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
             for (const eventToDelete of eventsMarkedForDeletion) {
                 try {
                     console.log(`[performQQCalDavSyncForUser] Attempting to delete event "${eventToDelete.title}" (${eventToDelete.caldav_url}) from QQ server.`);
-                    
+
                     const calendarObjectToDelete = { url: eventToDelete.caldav_url };
-                    await client.deleteCalendarObject({ 
-                        calendarObject: calendarObjectToDelete 
+                    await client.deleteCalendarObject({
+                        calendarObject: calendarObjectToDelete
                     });
 
                     console.log(`[performQQCalDavSyncForUser] Successfully deleted event "${eventToDelete.title}" from QQ server.`);
-                    
+
                     // 从本地彻底删除该事件
                     userEvents = userEvents.filter(e => e.id !== eventToDelete.id);
                     deletedOnServerCount++;
@@ -2517,20 +2553,20 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                 }
             }
         }
-        
+
         // 新增：处理需要推送到服务器的本地事件
         let pushedToServerCount = 0;
         const eventsToPush = userEvents.filter(e => e.needs_caldav_push === true);
-        
+
         if (eventsToPush.length > 0) {
             console.log(`[performQQCalDavSyncForUser] Found ${eventsToPush.length} local events to push to QQ CalDAV.`);
-            
+
             for (const eventToPush of eventsToPush) {
                 try {
                     // 清理和截断标题和描述
                     let title = eventToPush.title || '未命名事件';
                     let description = eventToPush.description || '';
-                    
+
                     // 清理标题
                     title = title.replace(/^转发:\s*/, '');
                     title = title.replace(/\n.*$/s, '');
@@ -2538,7 +2574,7 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                     if (title.length > 200) {
                         title = title.substring(0, 197) + '...';
                     }
-                    
+
                     // 清理描述
                     if (description.length > 1000) {
                         const senderIndex = description.indexOf('发件人:');
@@ -2548,14 +2584,14 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                             description = description.substring(0, 497) + '...';
                         }
                     }
-                    
+
                     title = title.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
                     description = description.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
-                    
+
                     // 构建iCalendar数据
                     const startDate = new Date(eventToPush.start_datetime);
                     const endDate = eventToPush.end_datetime ? new Date(eventToPush.end_datetime) : new Date(startDate.getTime() + 3600 * 1000);
-                    
+
                     const formatDateForICS = (date, allDay = false) => {
                         const pad = (num) => String(num).padStart(2, '0');
                         const year = date.getUTCFullYear();
@@ -2567,7 +2603,7 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                         const seconds = pad(date.getUTCSeconds());
                         return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
                     };
-                    
+
                     const escapeICalendarText = (text) => {
                         if (!text) return '';
                         return text
@@ -2577,7 +2613,7 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                             .replace(/\r\n|\n|\r/g, '\\n')
                             .replace(/"/g, '\\"');
                     };
-                    
+
                     const icsDataArray = [
                         'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SiYuan//Steve-Tools Calendar//CN',
                         'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT', `UID:${eventToPush.id}`,
@@ -2586,16 +2622,16 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                         `DTEND:${formatDateForICS(endDate, false)}`,
                         `SUMMARY:${escapeICalendarText(title)}`
                     ];
-                    
+
                     if (description.trim()) {
                         icsDataArray.push(`DESCRIPTION:${escapeICalendarText(description)}`);
                     }
-                    
+
                     icsDataArray.push('END:VEVENT', 'END:VCALENDAR');
                     const icsString = icsDataArray.join('\r\n');
-                    
+
                     console.log(`[performQQCalDavSyncForUser] Pushing event "${title}" to QQ CalDAV...`);
-                    
+
                     // 推送到QQ CalDAV
                     const filename = `${eventToPush.id}.ics`;
                     const createResponse = await client.createCalendarObject({
@@ -2603,10 +2639,10 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                         filename: filename,
                         iCalString: icsString,
                     });
-                    
+
                     if (createResponse && (createResponse.status === 200 || createResponse.status === 201 || createResponse.status === 204)) {
                         console.log(`[performQQCalDavSyncForUser] Successfully pushed event "${title}" to QQ CalDAV.`);
-                        
+
                         // 更新本地事件状态
                         const eventIndex = userEvents.findIndex(e => e.id === eventToPush.id);
                         if (eventIndex !== -1) {
@@ -2623,22 +2659,22 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
                 }
             }
         }
-        
+
         // 保存用户事件
         await saveEvents(userEvents, userId);
-        
+
         console.log(`[performQQCalDavSyncForUser] CalDAV sync completed for user ${userId}. Added ${addedFromServerCount} events, pushed ${pushedToServerCount} events, removed ${removedLocallyCount} events, deleted ${deletedOnServerCount} events from server.`);
-        return { 
-            message: `CalDAV同步完成。从服务器添加了 ${addedFromServerCount} 个事件，推送了 ${pushedToServerCount} 个事件，删除了 ${removedLocallyCount} 个事件，从服务器删除了 ${deletedOnServerCount} 个事件。`, 
-            eventCount: addedFromServerCount + pushedToServerCount - removedLocallyCount - deletedOnServerCount 
+        return {
+            message: `CalDAV同步完成。从服务器添加了 ${addedFromServerCount} 个事件，推送了 ${pushedToServerCount} 个事件，删除了 ${removedLocallyCount} 个事件，从服务器删除了 ${deletedOnServerCount} 个事件。`,
+            eventCount: addedFromServerCount + pushedToServerCount - removedLocallyCount - deletedOnServerCount
         };
-        
+
     } catch (error) {
         console.error(`[performQQCalDavSyncForUser] Error during CalDAV sync for user ${userId}:`, error);
-        return { 
-            message: `CalDAV同步失败: ${error.message}`, 
-            eventCount: -1, 
-            error: true 
+        return {
+            message: `CalDAV同步失败: ${error.message}`,
+            eventCount: -1,
+            error: true
         };
     }
 }
@@ -2646,17 +2682,17 @@ async function performQQCalDavSyncForUser(userCalDAVSettings, userEvents, userId
 // --- 用户特定的通用CalDAV同步函数 ---
 async function performGenericCalDavSyncForUser(userCalDAVSettings, userEvents, userId) {
     console.log(`[performGenericCalDavSyncForUser] Generic CalDAV sync for user ${userId} - simplified version`);
-    
+
     // 简化版本：直接返回成功状态
-    return { 
-        message: `通用CalDAV同步暂未完整实现用户隔离版本`, 
-        eventCount: 0 
+    return {
+        message: `通用CalDAV同步暂未完整实现用户隔离版本`,
+        eventCount: 0
     };
 }
 
 // --- 新函数：专门处理 QQ CalDAV 同步逻辑 ---
 async function performQQCalDavSync() {
-    const currentSettings = caldavSettings; 
+    const currentSettings = caldavSettings;
     console.log(`[performQQCalDavSync] Starting QQ specific sync for: ${currentSettings.username}`);
     // 声明所有将在此函数中使用的计数器
     let addedFromServerCount = 0;
@@ -2671,7 +2707,7 @@ async function performQQCalDavSync() {
     let targetServerUrl = currentSettings.serverUrl;
     if (!targetServerUrl.startsWith('http')) targetServerUrl = 'https://' + targetServerUrl;
     if (!targetServerUrl.endsWith('/')) targetServerUrl += '/';
-    console.log(`[performQQCalDavSync] Connecting to: ${targetServerUrl}`); 
+    console.log(`[performQQCalDavSync] Connecting to: ${targetServerUrl}`);
 
     try {
         const client = new DAVClient({
@@ -2685,21 +2721,21 @@ async function performQQCalDavSync() {
         });
 
         await client.login();
-        console.log("[performQQCalDavSync] Login successful. Fetching calendars..."); 
+        console.log("[performQQCalDavSync] Login successful. Fetching calendars...");
         const calendars = await client.fetchCalendars();
         if (calendars.length === 0) {
-             console.log('[performQQCalDavSync] No calendars found.'); 
-             return { message: 'No calendars found on server.', eventCount: 0 };
+            console.log('[performQQCalDavSync] No calendars found.');
+            return { message: 'No calendars found on server.', eventCount: 0 };
         }
         let targetCalendar = calendars.find(cal => cal.displayName === 'Calendar' || cal.displayName === '日历') || calendars[0];
-        console.log(`[performQQCalDavSync] Syncing calendar: ${targetCalendar.displayName} (${targetCalendar.url})`); 
+        console.log(`[performQQCalDavSync] Syncing calendar: ${targetCalendar.displayName} (${targetCalendar.url})`);
 
         const { startDate, endDate } = getStartEndDateForSync();
-        console.log(`[performQQCalDavSync] Fetching events from ${startDate.toISOString()} to ${endDate.toISOString()}`); 
+        console.log(`[performQQCalDavSync] Fetching events from ${startDate.toISOString()} to ${endDate.toISOString()}`);
         const calendarObjects = await client.fetchCalendarObjects({
             calendar: targetCalendar,
-            calendarData: { 
-                compFilter: { 
+            calendarData: {
+                compFilter: {
                     attrs: { name: 'VCALENDAR' },
                     compFilter: {
                         attrs: { name: 'VEVENT' },
@@ -2708,18 +2744,18 @@ async function performQQCalDavSync() {
                             end: endDate.toISOString(),
                         },
                     },
-                 }
+                }
             }
         });
-        console.log(`[performQQCalDavSync] Fetched ${calendarObjects.length} raw calendar objects.`); 
+        console.log(`[performQQCalDavSync] Fetched ${calendarObjects.length} raw calendar objects.`);
 
         // --- 处理从服务器获取的事件 (保持不变) ---
         const newOrUpdatedEvents = [];
-        const eventsFromServerMap = new Map(); 
+        const eventsFromServerMap = new Map();
         for (const obj of calendarObjects) {
             // ... (拉取和解析 QQ 事件的逻辑保持不变) ...
-             if (!obj.data) continue;
-            
+            if (!obj.data) continue;
+
             // --- 注释掉调试日志：记录从QQ服务器拉取的原始ICS数据 ---
             /*
             if (currentSettings.serverUrl && currentSettings.serverUrl.includes('dav.qq.com')) {
@@ -2727,7 +2763,7 @@ async function performQQCalDavSync() {
             }
             */
             // -------------------------------------------------
-            
+
             try {
                 const parsedEvents = ical.parseICS(obj.data);
                 for (const key in parsedEvents) {
@@ -2736,14 +2772,14 @@ async function performQQCalDavSync() {
                         const eventUid = vevent.uid || obj.url;
                         const recurrenceId = vevent.recurrenceid ? new Date(vevent.recurrenceid).toISOString() : null;
                         const uniqueId = recurrenceId ? `${eventUid}_${recurrenceId}` : eventUid;
-                        
+
                         eventsFromServerMap.set(uniqueId, { etag: obj.etag, data: vevent }); // 存储 ETag 和 VEVENT 数据
 
                         const eventStartDate = vevent.start ? new Date(vevent.start) : null;
-                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600*1000) : null);
+                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600 * 1000) : null);
 
                         if (eventStartDate && eventEndDate && !isNaN(eventStartDate) && !isNaN(eventEndDate)) {
-                             const eventData = {
+                            const eventData = {
                                 id: uniqueId,
                                 title: vevent.summary || '无标题事件',
                                 start_datetime: eventStartDate.toISOString(),
@@ -2770,10 +2806,10 @@ async function performQQCalDavSync() {
                                 if (existingEvent.caldav_etag !== obj.etag) {
                                     // ETag 不同，表示服务器上有更新，需要更新本地事件
                                     console.log(`[performQQCalDavSync] Updating local event ${uniqueId} from server (ETag changed).`); // <-- 修改日志前缀
-                                    eventsDb[existingLocalEventIndex] = eventData; 
+                                    eventsDb[existingLocalEventIndex] = eventData;
                                     // 标记一下需要保存 (虽然最后总会保存)
                                 } else {
-                                     // ETag 相同，无需操作
+                                    // ETag 相同，无需操作
                                 }
                             }
                         }
@@ -2783,29 +2819,29 @@ async function performQQCalDavSync() {
                 console.error(`[performQQCalDavSync] Error parsing ICS for ${obj.url}:`, parseError); // <-- 修改日志前缀
             }
         }
-        
+
         // 合并新增的事件
         let addedFromServerCount = 0;
         if (newOrUpdatedEvents.length > 0) {
-             console.log(`[performQQCalDavSync] Found ${newOrUpdatedEvents.length} new events from CalDAV server to add locally.`); // <-- 修改日志前缀
+            console.log(`[performQQCalDavSync] Found ${newOrUpdatedEvents.length} new events from CalDAV server to add locally.`); // <-- 修改日志前缀
             eventsDb = [...eventsDb, ...newOrUpdatedEvents];
             addedFromServerCount = newOrUpdatedEvents.length;
         }
-        
+
         // 移除本地存在但服务器上已不存在的事件
         let removedLocallyCount = 0;
         eventsDb = eventsDb.filter(localEvent => {
             if (localEvent.source === 'caldav_sync_tsdav') {
                 if (!eventsFromServerMap.has(localEvent.id)) {
-                     console.log(`[performQQCalDavSync] Removing local event ${localEvent.id} (source: CalDAV) as it's no longer on the server.`); // <-- 修改日志前缀
-                     removedLocallyCount++;
-                     return false; // 过滤掉
+                    console.log(`[performQQCalDavSync] Removing local event ${localEvent.id} (source: CalDAV) as it's no longer on the server.`); // <-- 修改日志前缀
+                    removedLocallyCount++;
+                    return false; // 过滤掉
                 }
             }
             return true; // 保留其他来源的事件或服务器上存在的 CalDAV 事件
         });
-        if(removedLocallyCount > 0) {
-             console.log(`[performQQCalDavSync] Removed ${removedLocallyCount} local events that were deleted from server.`); // <-- 修改日志前缀
+        if (removedLocallyCount > 0) {
+            console.log(`[performQQCalDavSync] Removed ${removedLocallyCount} local events that were deleted from server.`); // <-- 修改日志前缀
         }
 
         // --- 新增：处理需要在服务器上删除的事件 ---
@@ -2818,15 +2854,15 @@ async function performQQCalDavSync() {
             for (const eventToDelete of eventsMarkedForDeletion) {
                 try {
                     console.log(`[performQQCalDavSync] Attempting to delete event ${eventToDelete.id} (${eventToDelete.caldav_url}) from QQ server.`);
-                    
+
                     const calendarObjectToDelete = { url: eventToDelete.caldav_url };
                     // 根据 tsdav 的文档或实际测试，deleteCalendarObject 可能不需要 etag
                     // 如果需要 If-Match 行为，通常 ETag 会在 calendarObjectToDelete 对象内部传递，例如 calendarObjectToDelete.etag = eventToDelete.caldav_etag;
                     // 或者作为单独的参数，但 tsdav 的 API 定义似乎更倾向于前者或不使用。
                     // 我们先尝试不显式传递 ETag，因为 `siyuan-steve-tools` 的 delete 也没传。
 
-                    await client.deleteCalendarObject({ 
-                        calendarObject: calendarObjectToDelete 
+                    await client.deleteCalendarObject({
+                        calendarObject: calendarObjectToDelete
                     });
 
                     console.log(`[performQQCalDavSync] Successfully deleted event ${eventToDelete.id} from QQ server.`);
@@ -2866,10 +2902,10 @@ async function performQQCalDavSync() {
                 eventDateToSort = new Date(event.start_datetime);
             }
             if (
-                eventDateToSort && eventDateToSort >= sixMonthsAgo && 
-                (!event.source || (event.source && !event.source.startsWith('caldav_sync'))) && 
-                !event.caldav_url && 
-                event.needs_caldav_push !== true 
+                eventDateToSort && eventDateToSort >= sixMonthsAgo &&
+                (!event.source || (event.source && !event.source.startsWith('caldav_sync'))) &&
+                !event.caldav_url &&
+                event.needs_caldav_push !== true
             ) {
                 console.log(`[performQQCalDavSync] Marking older local event (ID: ${event.id}, Title: "${event.title}", Date: ${eventDateToSort.toISOString()}) for push to QQ CalDAV as it\'s within 6 months and has no QQ URL.`);
                 event.needs_caldav_push = true;
@@ -2896,167 +2932,167 @@ async function performQQCalDavSync() {
         console.log(`[performQQCalDavSync] Found ${eventsToPushOrUpdate.length} total events marked for pushing/updating to QQ CalDAV (includes newly created, modified, and any older events identified for补推).`);
 
         if (eventsToPushOrUpdate.length > 0) {
-            for (const eventToModify of eventsToPushOrUpdate) { 
+            for (const eventToModify of eventsToPushOrUpdate) {
                 let manualIcsString = ''; // 示例，实际ICS构建逻辑保留
-                    // (手动构建ICS的代码应该在这里)
-                    const uid = eventToModify.id;
-                    // 清理和截断标题和描述，避免过长内容导致CalDAV推送失败
-                    let title = eventToModify.title || '未命名事件';
-                    let description = eventToModify.description || '';
-                    
-                    // 清理标题：移除邮件转发前缀，只保留核心内容
-                    title = title.replace(/^转发:\s*/, ''); // 移除"转发:"前缀
-                    title = title.replace(/\n.*$/s, ''); // 移除第一行后的所有内容
-                    title = title.trim();
-                    
-                    // 限制标题长度（CalDAV SUMMARY字段建议不超过200字符）
-                    if (title.length > 200) {
-                        title = title.substring(0, 197) + '...';
-                    }
-                    
-                    // 清理描述：移除过长的邮件签名和格式信息
-                    if (description.length > 1000) {
-                        // 查找第一个"发件人:"位置，截取到该位置
-                        const senderIndex = description.indexOf('发件人:');
-                        if (senderIndex > 0 && senderIndex < 500) {
-                            description = description.substring(0, senderIndex).trim();
-                        } else {
-                            // 如果没有找到发件人，直接截取前500字符
-                            description = description.substring(0, 497) + '...';
-                        }
-                    }
-                    
-                    // 清理特殊字符和格式，确保iCalendar兼容性
-                    title = title.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
-                    description = description.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
-                    
-                    console.log(`[performQQCalDavSync] 清理后标题 (${title.length}字符): ${title}`);
-                    if (description) {
-                        console.log(`[performQQCalDavSync] 清理后描述 (${description.length}字符): ${description.substring(0, 100)}...`);
-                    }
-                    const startStr = eventToModify.start_datetime;
-                    const endStr = eventToModify.end_datetime;
-                    if (!startStr) { /* ... */ continue; }
-                    const startDate = new Date(startStr);
-                    const endDate = endStr ? new Date(endStr) : new Date(startDate.getTime() + 3600 * 1000);
-                    let isAllDay = false;
-                    if (startStr.length === 10 || (startStr.includes('T00:00:00') && endStr && (new Date(endStr).getTime() - startDate.getTime()) >= (24*60*60*1000 - 1000) )) {
-                       isAllDay = true;
-                    } 
-                    const formatDateForICS = (date, allDay = false) => {
-                        const pad = (num) => String(num).padStart(2, '0');
-                        const year = date.getUTCFullYear();
-                        const month = pad(date.getUTCMonth() + 1);
-                        const day = pad(date.getUTCDate());
-                        if (allDay) { return `${year}${month}${day}`; }
-                        const hours = pad(date.getUTCHours());
-                        const minutes = pad(date.getUTCMinutes());
-                        const seconds = pad(date.getUTCSeconds());
-                        return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
-                    };
-                    const icsDataArray = [
-                        'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SiYuan//Steve-Tools Calendar//CN',
-                        'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT', `UID:${uid}`,
-                        `DTSTAMP:${formatDateForICS(new Date(), false)}`,
-                    ];
-                    if (isAllDay) {
-                        const endDateAllDay = new Date(startDate); endDateAllDay.setUTCDate(startDate.getUTCDate() + 1);
-                        icsDataArray.push(`DTSTART;VALUE=DATE:${formatDateForICS(startDate, true)}`);
-                        icsDataArray.push(`DTEND;VALUE=DATE:${formatDateForICS(endDateAllDay, true)}`);
-                    } else {
-                        icsDataArray.push(`DTSTART:${formatDateForICS(startDate, false)}`);
-                        icsDataArray.push(`DTEND:${formatDateForICS(endDate, false)}`);
-                    }
-                    // iCalendar字段转义函数
-                    const escapeICalendarText = (text) => {
-                        if (!text) return '';
-                        return text
-                            .replace(/\\/g, '\\\\')    // 反斜杠转义
-                            .replace(/;/g, '\\;')      // 分号转义
-                            .replace(/,/g, '\\,')      // 逗号转义
-                            .replace(/\r\n|\n|\r/g, '\\n') // 换行符转义
-                            .replace(/"/g, '\\"');     // 双引号转义
-                    };
-                    
-                    icsDataArray.push(`SUMMARY:${escapeICalendarText(title)}`);
-                    if (description.trim()) { 
-                        icsDataArray.push(`DESCRIPTION:${escapeICalendarText(description)}`); 
-                    }
-                    icsDataArray.push('END:VEVENT', 'END:VCALENDAR');
-                    manualIcsString = icsDataArray.join('\r\n');
+                // (手动构建ICS的代码应该在这里)
+                const uid = eventToModify.id;
+                // 清理和截断标题和描述，避免过长内容导致CalDAV推送失败
+                let title = eventToModify.title || '未命名事件';
+                let description = eventToModify.description || '';
 
-                    if (!manualIcsString) { /* ... */ continue; }
-                    console.log(`[performQQCalDavSync] Manually generated iCalendar data for ${uid}:\n------ BEGIN QQ PUSH ICS ------\n${manualIcsString}\n------ END QQ PUSH ICS ------`);
+                // 清理标题：移除邮件转发前缀，只保留核心内容
+                title = title.replace(/^转发:\s*/, ''); // 移除"转发:"前缀
+                title = title.replace(/\n.*$/s, ''); // 移除第一行后的所有内容
+                title = title.trim();
 
-                    if (eventToModify.caldav_url && eventToModify.caldav_etag) {
-                        // --- 更新逻辑 ---
-                        // ... (省略更新逻辑，保持不变)
+                // 限制标题长度（CalDAV SUMMARY字段建议不超过200字符）
+                if (title.length > 200) {
+                    title = title.substring(0, 197) + '...';
+                }
+
+                // 清理描述：移除过长的邮件签名和格式信息
+                if (description.length > 1000) {
+                    // 查找第一个"发件人:"位置，截取到该位置
+                    const senderIndex = description.indexOf('发件人:');
+                    if (senderIndex > 0 && senderIndex < 500) {
+                        description = description.substring(0, senderIndex).trim();
                     } else {
-                        // --- 创建逻辑 --- 
-                        const filename = `${eventToModify.id}.ics`;
+                        // 如果没有找到发件人，直接截取前500字符
+                        description = description.substring(0, 497) + '...';
+                    }
+                }
+
+                // 清理特殊字符和格式，确保iCalendar兼容性
+                title = title.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
+                description = description.replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
+
+                console.log(`[performQQCalDavSync] 清理后标题 (${title.length}字符): ${title}`);
+                if (description) {
+                    console.log(`[performQQCalDavSync] 清理后描述 (${description.length}字符): ${description.substring(0, 100)}...`);
+                }
+                const startStr = eventToModify.start_datetime;
+                const endStr = eventToModify.end_datetime;
+                if (!startStr) { /* ... */ continue; }
+                const startDate = new Date(startStr);
+                const endDate = endStr ? new Date(endStr) : new Date(startDate.getTime() + 3600 * 1000);
+                let isAllDay = false;
+                if (startStr.length === 10 || (startStr.includes('T00:00:00') && endStr && (new Date(endStr).getTime() - startDate.getTime()) >= (24 * 60 * 60 * 1000 - 1000))) {
+                    isAllDay = true;
+                }
+                const formatDateForICS = (date, allDay = false) => {
+                    const pad = (num) => String(num).padStart(2, '0');
+                    const year = date.getUTCFullYear();
+                    const month = pad(date.getUTCMonth() + 1);
+                    const day = pad(date.getUTCDate());
+                    if (allDay) { return `${year}${month}${day}`; }
+                    const hours = pad(date.getUTCHours());
+                    const minutes = pad(date.getUTCMinutes());
+                    const seconds = pad(date.getUTCSeconds());
+                    return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
+                };
+                const icsDataArray = [
+                    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SiYuan//Steve-Tools Calendar//CN',
+                    'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT', `UID:${uid}`,
+                    `DTSTAMP:${formatDateForICS(new Date(), false)}`,
+                ];
+                if (isAllDay) {
+                    const endDateAllDay = new Date(startDate); endDateAllDay.setUTCDate(startDate.getUTCDate() + 1);
+                    icsDataArray.push(`DTSTART;VALUE=DATE:${formatDateForICS(startDate, true)}`);
+                    icsDataArray.push(`DTEND;VALUE=DATE:${formatDateForICS(endDateAllDay, true)}`);
+                } else {
+                    icsDataArray.push(`DTSTART:${formatDateForICS(startDate, false)}`);
+                    icsDataArray.push(`DTEND:${formatDateForICS(endDate, false)}`);
+                }
+                // iCalendar字段转义函数
+                const escapeICalendarText = (text) => {
+                    if (!text) return '';
+                    return text
+                        .replace(/\\/g, '\\\\')    // 反斜杠转义
+                        .replace(/;/g, '\\;')      // 分号转义
+                        .replace(/,/g, '\\,')      // 逗号转义
+                        .replace(/\r\n|\n|\r/g, '\\n') // 换行符转义
+                        .replace(/"/g, '\\"');     // 双引号转义
+                };
+
+                icsDataArray.push(`SUMMARY:${escapeICalendarText(title)}`);
+                if (description.trim()) {
+                    icsDataArray.push(`DESCRIPTION:${escapeICalendarText(description)}`);
+                }
+                icsDataArray.push('END:VEVENT', 'END:VCALENDAR');
+                manualIcsString = icsDataArray.join('\r\n');
+
+                if (!manualIcsString) { /* ... */ continue; }
+                console.log(`[performQQCalDavSync] Manually generated iCalendar data for ${uid}:\n------ BEGIN QQ PUSH ICS ------\n${manualIcsString}\n------ END QQ PUSH ICS ------`);
+
+                if (eventToModify.caldav_url && eventToModify.caldav_etag) {
+                    // --- 更新逻辑 ---
+                    // ... (省略更新逻辑，保持不变)
+                } else {
+                    // --- 创建逻辑 --- 
+                    const filename = `${eventToModify.id}.ics`;
                     console.log(`[performQQCalDavSync] Creating object ${filename} in calendar ${targetCalendar.url}...`);
-                        
-                        const createResponse = await client.createCalendarObject({
+
+                    const createResponse = await client.createCalendarObject({
                         calendar: targetCalendar,
                         filename: filename,
-                            iCalString: manualIcsString, 
-                        });
+                        iCalString: manualIcsString,
+                    });
 
-                        let actualStatus = null;
-                        let newEtag = null;
-                        let responseDataForLog = createResponse; 
+                    let actualStatus = null;
+                    let newEtag = null;
+                    let responseDataForLog = createResponse;
 
-                        // 直接从 Response 对象获取 status 和 ETag
-                        if (createResponse && typeof createResponse.status === 'number') {
+                    // 直接从 Response 对象获取 status 和 ETag
+                    if (createResponse && typeof createResponse.status === 'number') {
+                        actualStatus = createResponse.status;
+                        if (createResponse.headers && typeof createResponse.headers.get === 'function') {
+                            newEtag = createResponse.headers.get('ETag') || createResponse.headers.get('etag'); // 尝试获取 ETag (常见大小写)
+                        }
+                    } else if (createResponse && typeof createResponse === 'object') {
+                        // Fallback for other possible tsdav response structures (if not raw Response)
+                        if (createResponse.hasOwnProperty('status')) {
                             actualStatus = createResponse.status;
-                            if (createResponse.headers && typeof createResponse.headers.get === 'function') {
-                                newEtag = createResponse.headers.get('ETag') || createResponse.headers.get('etag'); // 尝试获取 ETag (常见大小写)
-                            }
-                        } else if (createResponse && typeof createResponse === 'object') {
-                            // Fallback for other possible tsdav response structures (if not raw Response)
-                            if (createResponse.hasOwnProperty('status')) {
-                                actualStatus = createResponse.status;
-                            } else if (createResponse.hasOwnProperty('statusCode')) {
-                                actualStatus = createResponse.statusCode;
-                            }
-                            if (createResponse.hasOwnProperty('etag')) {
-                                newEtag = createResponse.etag;
-                            }
-                            if (actualStatus === null && newEtag) {
-                                console.log('[performQQCalDavSync] createCalendarObject returned ETag but no explicit status, assuming success (e.g., 201 Created).');
-                                actualStatus = 201;
-                            }
+                        } else if (createResponse.hasOwnProperty('statusCode')) {
+                            actualStatus = createResponse.statusCode;
                         }
-                        
-                        const successfulCreateStatusCodes = [200, 201, 204]; 
-
-                        if (actualStatus && successfulCreateStatusCodes.includes(actualStatus)) {
-                            if (newEtag) {
-                                console.log(`[performQQCalDavSync] Successfully created ${filename} on QQ server (Status: ${actualStatus}). ETag: ${newEtag}`);
-                            } else {
-                                console.warn(`[performQQCalDavSync] Event ${filename} created on QQ server (Status: ${actualStatus}), but no ETag returned or extracted. Marking as synced.`);
-                            }
-                        pushedToServerCount++;
-                            const indexToUpdate = eventsDb.findIndex(e => e.id === eventToModify.id);
-                        if (indexToUpdate !== -1) {
-                                let createdUrl = 'unknown';
-                                try {
-                                     const baseUrl = targetCalendar.url.endsWith('/') ? targetCalendar.url : targetCalendar.url + '/';
-                                     createdUrl = new URL(filename, baseUrl).href; 
-                                } catch(urlError) { createdUrl = `${targetCalendar.url}${filename}`; }
-                                eventsDb[indexToUpdate].caldav_url = createdUrl;
-                                eventsDb[indexToUpdate].caldav_uid = eventToModify.id;
-                                eventsDb[indexToUpdate].caldav_etag = newEtag;
-                            eventsDb[indexToUpdate].needs_caldav_push = false;
-                            eventsDb[indexToUpdate].source = 'caldav_sync_tsdav';
-                                // updatedLocallyCount++; // 使用在函数开始处声明的那个变量
-                                const localEventToUpdate = eventsDb[indexToUpdate];
-                                console.log(`[performQQCalDavSync] Updated local event ${eventToModify.id} with QQ CalDAV info after create.`);
+                        if (createResponse.hasOwnProperty('etag')) {
+                            newEtag = createResponse.etag;
                         }
-                    } else {
-                             console.error(`[performQQCalDavSync] Failed to create or verify creation of ${filename} on QQ server. Status: ${actualStatus || 'Unknown'}. Full Response for logging:`, responseDataForLog);
+                        if (actualStatus === null && newEtag) {
+                            console.log('[performQQCalDavSync] createCalendarObject returned ETag but no explicit status, assuming success (e.g., 201 Created).');
+                            actualStatus = 201;
                         }
                     }
+
+                    const successfulCreateStatusCodes = [200, 201, 204];
+
+                    if (actualStatus && successfulCreateStatusCodes.includes(actualStatus)) {
+                        if (newEtag) {
+                            console.log(`[performQQCalDavSync] Successfully created ${filename} on QQ server (Status: ${actualStatus}). ETag: ${newEtag}`);
+                        } else {
+                            console.warn(`[performQQCalDavSync] Event ${filename} created on QQ server (Status: ${actualStatus}), but no ETag returned or extracted. Marking as synced.`);
+                        }
+                        pushedToServerCount++;
+                        const indexToUpdate = eventsDb.findIndex(e => e.id === eventToModify.id);
+                        if (indexToUpdate !== -1) {
+                            let createdUrl = 'unknown';
+                            try {
+                                const baseUrl = targetCalendar.url.endsWith('/') ? targetCalendar.url : targetCalendar.url + '/';
+                                createdUrl = new URL(filename, baseUrl).href;
+                            } catch (urlError) { createdUrl = `${targetCalendar.url}${filename}`; }
+                            eventsDb[indexToUpdate].caldav_url = createdUrl;
+                            eventsDb[indexToUpdate].caldav_uid = eventToModify.id;
+                            eventsDb[indexToUpdate].caldav_etag = newEtag;
+                            eventsDb[indexToUpdate].needs_caldav_push = false;
+                            eventsDb[indexToUpdate].source = 'caldav_sync_tsdav';
+                            // updatedLocallyCount++; // 使用在函数开始处声明的那个变量
+                            const localEventToUpdate = eventsDb[indexToUpdate];
+                            console.log(`[performQQCalDavSync] Updated local event ${eventToModify.id} with QQ CalDAV info after create.`);
+                        }
+                    } else {
+                        console.error(`[performQQCalDavSync] Failed to create or verify creation of ${filename} on QQ server. Status: ${actualStatus || 'Unknown'}. Full Response for logging:`, responseDataForLog);
+                    }
+                }
                 // ... (catch块和循环结束)
             }
         }
@@ -3067,25 +3103,25 @@ async function performQQCalDavSync() {
             console.log(`[performQQCalDavSync] Saving updated eventsDb. Added: ${addedFromServerCount}, RemovedLocally: ${removedLocallyCount}, PushedOrUpdatedLocally: ${updatedLocallyCount}, DeletedOnServer: ${deletedOnServerCount}`);
             await saveEvents(eventsDb);
         } else {
-             console.log('[performQQCalDavSync] No changes to eventsDb required after sync and push/delete attempt.');
+            console.log('[performQQCalDavSync] No changes to eventsDb required after sync and push/delete attempt.');
         }
 
         console.log('[performQQCalDavSync] QQ CalDAV sync process finished.');
         const message = `QQ CalDAV Sync successful. Added ${addedFromServerCount} from server. Removed ${removedLocallyCount} locally. Deleted ${deletedOnServerCount} on server. Created ${pushedToServerCount} on server. Updated ${updatedOnServerCount} on server.`;
-        return { message: message, eventCount: addedFromServerCount + pushedToServerCount + updatedOnServerCount - removedLocallyCount - deletedOnServerCount }; 
+        return { message: message, eventCount: addedFromServerCount + pushedToServerCount + updatedOnServerCount - removedLocallyCount - deletedOnServerCount };
 
     } catch (error) {
-         console.error('[performQQCalDavSync] Error during QQ CalDAV sync process:', error); // <-- 修改日志前缀
-         // isCalDavSyncRunning = false; // 不再在此函数中管理锁
-          throw error; // Re-throw for the dispatcher handler
-    } 
+        console.error('[performQQCalDavSync] Error during QQ CalDAV sync process:', error); // <-- 修改日志前缀
+        // isCalDavSyncRunning = false; // 不再在此函数中管理锁
+        throw error; // Re-throw for the dispatcher handler
+    }
 }
 
 // --- 新函数：处理飞书 CalDAV 同步逻辑 (初始框架，只读) ---
 async function performFeishuCalDavSync() {
     const currentSettings = caldavSettings;
     console.log(`[performFeishuCalDavSync] Starting Feishu sync for: ${currentSettings.username}`);
-    
+
     let targetServerUrl = currentSettings.serverUrl; // 应该配置为 https://caldav.feishu.cn
     if (!targetServerUrl.startsWith('http')) targetServerUrl = 'https://' + targetServerUrl;
     console.log(`[performFeishuCalDavSync] Connecting to: ${targetServerUrl}`);
@@ -3112,19 +3148,19 @@ async function performFeishuCalDavSync() {
         await client.login();
         console.log("[performFeishuCalDavSync] Login successful. Fetching calendars...");
         const calendars = await client.fetchCalendars();
-        
+
         // --- 添加日志：打印所有找到的日历 --- 
         if (calendars && calendars.length > 0) {
             console.log("[performFeishuCalDavSync] Found the following calendars:");
             calendars.forEach((cal, index) => {
                 console.log(`  [${index}] Name: ${cal.displayName}, URL: ${cal.url}, ReadOnly: ${cal.readOnly}`);
             });
-                 } else {
-             console.log('[performFeishuCalDavSync] No calendars found on Feishu server.');
-             return { message: 'No calendars found on Feishu server.', eventCount: 0 };
+        } else {
+            console.log('[performFeishuCalDavSync] No calendars found on Feishu server.');
+            return { message: 'No calendars found on Feishu server.', eventCount: 0 };
         }
         // ----------------------------------------
-        
+
         // 飞书可能只有一个主日历，或者需要用户指定。先假设同步第一个找到的。
         // let targetCalendar = calendars.find(cal => cal.url.includes('primary')) || calendars[0]; // 不再自动选择
         // --- 修改：明确选择名为 "李俊平" 的日历 --- 
@@ -3136,7 +3172,7 @@ async function performFeishuCalDavSync() {
                 console.warn('[performFeishuCalDavSync] Falling back to the first available calendar.');
                 targetCalendar = calendars[0];
             } else {
-                 return { message: 'Could not find the calendar named "李俊平" and no other calendars available.', eventCount: -1, error: true };
+                return { message: 'Could not find the calendar named "李俊平" and no other calendars available.', eventCount: -1, error: true };
             }
         }
         // -----------------------------------------
@@ -3156,15 +3192,15 @@ async function performFeishuCalDavSync() {
 
         // --- 处理从服务器获取的事件 (通用逻辑) ---
         const newOrUpdatedEvents = [];
-        const eventsFromServerMap = new Map(); 
+        const eventsFromServerMap = new Map();
         for (const obj of calendarObjects) {
             if (!obj.data) continue;
-            
+
             // --- 添加日志：记录从飞书服务器拉取的原始ICS数据 ---
             console.log(`[Feishu CalDAV Debug] Raw ICS data from Feishu for URL ${obj.url} (ETag: ${obj.etag}):\n------ BEGIN FEISHU ICS ------\n${obj.data}\n------ END FEISHU ICS ------`);
             // -------------------------------------------------
 
-             try {
+            try {
                 const parsedEvents = ical.parseICS(obj.data);
                 for (const key in parsedEvents) {
                     if (parsedEvents[key].type === 'VEVENT') {
@@ -3172,14 +3208,14 @@ async function performFeishuCalDavSync() {
                         const eventUid = vevent.uid || obj.url;
                         const recurrenceId = vevent.recurrenceid ? new Date(vevent.recurrenceid).toISOString() : null;
                         const uniqueId = recurrenceId ? `${eventUid}_${recurrenceId}` : eventUid;
-                        
-                        eventsFromServerMap.set(uniqueId, { etag: obj.etag, data: vevent }); 
+
+                        eventsFromServerMap.set(uniqueId, { etag: obj.etag, data: vevent });
 
                         const eventStartDate = vevent.start ? new Date(vevent.start) : null;
-                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600*1000) : null);
+                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600 * 1000) : null);
 
                         if (eventStartDate && eventEndDate && !isNaN(eventStartDate) && !isNaN(eventEndDate)) {
-                             const eventData = {
+                            const eventData = {
                                 id: uniqueId,
                                 title: vevent.summary || '无标题事件',
                                 start_datetime: eventStartDate.toISOString(),
@@ -3188,7 +3224,7 @@ async function performFeishuCalDavSync() {
                                 location: vevent.location || '',
                                 all_day: !!vevent.datetype && vevent.datetype === 'DATE',
                                 source: 'caldav_sync_feishu', // 新的来源标记
-                                caldav_uid: eventUid, 
+                                caldav_uid: eventUid,
                                 caldav_etag: obj.etag,
                                 caldav_url: obj.url, // <-- 添加这一行
                                 created_at: vevent.created ? new Date(vevent.created).toISOString() : new Date().toISOString(),
@@ -3199,11 +3235,11 @@ async function performFeishuCalDavSync() {
                             const existingLocalEventIndex = eventsDb.findIndex(e => e.id === uniqueId);
                             if (existingLocalEventIndex === -1) {
                                 newOrUpdatedEvents.push(eventData);
-        } else {
+                            } else {
                                 const existingEvent = eventsDb[existingLocalEventIndex];
                                 if (existingEvent.caldav_etag !== obj.etag) {
                                     console.log(`[performFeishuCalDavSync] Updating local event ${uniqueId} from Feishu server (ETag changed).`);
-                                    eventsDb[existingLocalEventIndex] = eventData; 
+                                    eventsDb[existingLocalEventIndex] = eventData;
                                 }
                             }
                         }
@@ -3213,56 +3249,56 @@ async function performFeishuCalDavSync() {
                 console.error(`[performFeishuCalDavSync] Error parsing ICS for ${obj.url}:`, parseError);
             }
         }
-        
+
         // 合并新增的事件
         let addedFromServerCount = 0;
         if (newOrUpdatedEvents.length > 0) {
-             console.log(`[performFeishuCalDavSync] Found ${newOrUpdatedEvents.length} new events from Feishu server to add locally.`);
+            console.log(`[performFeishuCalDavSync] Found ${newOrUpdatedEvents.length} new events from Feishu server to add locally.`);
             eventsDb = [...eventsDb, ...newOrUpdatedEvents];
             addedFromServerCount = newOrUpdatedEvents.length;
         }
-        
+
         // 移除本地存在但服务器上已不存在的事件 (仅限 Feishu 来源)
         let removedLocallyCount = 0;
         eventsDb = eventsDb.filter(localEvent => {
             if (localEvent.source === 'caldav_sync_feishu') {
                 if (!eventsFromServerMap.has(localEvent.id)) {
-                     console.log(`[performFeishuCalDavSync] Removing local event ${localEvent.id} (source: Feishu) as it's no longer on the server.`);
-                     removedLocallyCount++;
-                     return false; 
+                    console.log(`[performFeishuCalDavSync] Removing local event ${localEvent.id} (source: Feishu) as it's no longer on the server.`);
+                    removedLocallyCount++;
+                    return false;
                 }
             }
-            return true; 
+            return true;
         });
-        if(removedLocallyCount > 0) {
-             console.log(`[performFeishuCalDavSync] Removed ${removedLocallyCount} local events that were deleted from Feishu server.`);
+        if (removedLocallyCount > 0) {
+            console.log(`[performFeishuCalDavSync] Removed ${removedLocallyCount} local events that were deleted from Feishu server.`);
         }
 
         // --- 推送逻辑 (启用标准推送) ---
-        const eventsToPush = eventsDb.filter(e => 
-            e.needs_caldav_push === true && 
+        const eventsToPush = eventsDb.filter(e =>
+            e.needs_caldav_push === true &&
             e.source !== 'caldav_sync_feishu' && // 不要推送刚从飞书拉下来的
             !e.caldav_uid // 只推送全新创建的 (更新逻辑暂不处理)
         );
         console.log(`[performFeishuCalDavSync] Found ${eventsToPush.length} locally created events marked for pushing.`);
-        
-        let pushedToServerCount = 0; 
-        let updatedLocallyCount = 0; 
+
+        let pushedToServerCount = 0;
+        let updatedLocallyCount = 0;
 
         // --- 修改：仅当有事件要处理时才定义函数，并移到循环外 ---
         if (eventsToPush.length > 0) {
             // --- 将函数定义移到循环外部 ---
-                    const formatIcsDateArray = (dateString) => {
-                        if (!dateString) return undefined;
-                        const date = new Date(dateString);
-                        return [date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes(), date.getSeconds()];
-                    };
+            const formatIcsDateArray = (dateString) => {
+                if (!dateString) return undefined;
+                const date = new Date(dateString);
+                return [date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes(), date.getSeconds()];
+            };
             // --------------------------------
-                    
+
             for (const eventToPush of eventsToPush) {
                 try {
                     console.log(`[performFeishuCalDavSync] Preparing to push event ID: ${eventToPush.id}, Title: ${eventToPush.title}`);
-                    
+
                     // --- 使用 ics 库生成标准 iCalendar 数据 --- 
                     const eventAttributes = {
                         uid: eventToPush.id,
@@ -3271,8 +3307,8 @@ async function performFeishuCalDavSync() {
                         title: eventToPush.title || '无标题事件', // <-- Re-add SUMMARY
                         description: eventToPush.description || '', // <-- Re-add DESCRIPTION (can be empty)
                         location: eventToPush.location || '',     // <-- Re-add LOCATION (can be empty)
-                        productId: 'SmartCalendarApp/1.0', 
-                        sequence: 0, 
+                        productId: 'SmartCalendarApp/1.0',
+                        sequence: 0,
                         status: 'TENTATIVE', // <-- Change to TENTATIVE based on Feishu example
                         // Set TRANSP based on whether start/end times suggest an all-day event
                         // (ics library might handle this if start/end are date arrays only, but let's be explicit)
@@ -3303,11 +3339,11 @@ async function performFeishuCalDavSync() {
                     if (result.error) {
                         console.error("[performFeishuCalDavSync] Error generating standard ICS data:", result.error);
                         // 如果是之前的 organizer 错误，这里不应该再出现
-                        throw result.error; 
+                        throw result.error;
                     } else {
                         iCalendarData = result.value;
                         // 移除 ics 库默认添加的 METHOD:PUBLISH (如果存在)
-                        iCalendarData = iCalendarData.replace(/^METHOD:PUBLISH\r?\n/gm, ''); 
+                        iCalendarData = iCalendarData.replace(/^METHOD:PUBLISH\r?\n/gm, '');
                         // 移除 ics 库可能添加的 X-PUBLISHED-TTL
                         iCalendarData = iCalendarData.replace(/^X-PUBLISHED-TTL:.*?\r?\n/gm, '');
                         // 尝试添加空的 METHOD: 行 (像飞书示例那样)
@@ -3320,10 +3356,10 @@ async function performFeishuCalDavSync() {
                     }
 
                     if (!iCalendarData || !iCalendarData.includes('BEGIN:VEVENT')) {
-                         console.error("[performFeishuCalDavSync] Standard ICS generation failed.");
-                         throw new Error('Standard ICS generation failed.');
+                        console.error("[performFeishuCalDavSync] Standard ICS generation failed.");
+                        throw new Error('Standard ICS generation failed.');
                     }
-                    
+
                     const filename = `${eventToPush.id}.ics`; // 使用事件 ID 作为文件名
                     console.log(`[performFeishuCalDavSync] Generated standard iCalendar data for ${filename}:
 ------ BEGIN ICS ------
@@ -3344,62 +3380,62 @@ ${iCalendarData}
                         // 更新本地事件状态
                         const indexToUpdate = eventsDb.findIndex(e => e.id === eventToPush.id);
                         if (indexToUpdate !== -1) {
-                            eventsDb[indexToUpdate].caldav_uid = eventToPush.id; 
+                            eventsDb[indexToUpdate].caldav_uid = eventToPush.id;
                             eventsDb[indexToUpdate].caldav_etag = createResult.etag;
-                            eventsDb[indexToUpdate].needs_caldav_push = false; 
+                            eventsDb[indexToUpdate].needs_caldav_push = false;
                             eventsDb[indexToUpdate].source = 'caldav_sync_feishu'; // 推送成功后来源视为 Feishu
                             updatedLocallyCount++;
                             console.log(`[performFeishuCalDavSync] Updated local event ${eventToPush.id} with Feishu CalDAV info.`);
                         } else {
-                             console.warn(`[performFeishuCalDavSync] Could not find local event ${eventToPush.id} to update after successful push.`);
+                            console.warn(`[performFeishuCalDavSync] Could not find local event ${eventToPush.id} to update after successful push.`);
                         }
                     } else {
-                         // 飞书可能返回 201 Created 但没有 ETag，也视为成功
-                         // 需要检查 createResult 的状态码，但 tsdav 可能不直接暴露 response status
-                         // 暂时假设没有 etag 就是失败，后续可优化
-                         console.error(`[performFeishuCalDavSync] Failed to create ${filename} on Feishu server. createResult:`, createResult);
-                         // 可以考虑不抛出错误，允许后续事件继续推送
+                        // 飞书可能返回 201 Created 但没有 ETag，也视为成功
+                        // 需要检查 createResult 的状态码，但 tsdav 可能不直接暴露 response status
+                        // 暂时假设没有 etag 就是失败，后续可优化
+                        console.error(`[performFeishuCalDavSync] Failed to create ${filename} on Feishu server. createResult:`, createResult);
+                        // 可以考虑不抛出错误，允许后续事件继续推送
                     }
 
                 } catch (pushError) {
                     console.error(`[performFeishuCalDavSync] Error pushing event ID ${eventToPush.id} to Feishu CalDAV server:`, pushError);
-                    
+
                     // --- 处理 409 Conflict --- 
                     // tsdav 错误可能不直接包含 status code，需要检查响应对象 (如果 pushError 包含原始响应)
                     // 假设 pushError.response.status 存在或类似结构
                     let isConflict = false;
                     if (pushError && pushError.message && pushError.message.includes('409')) { // 检查消息字符串
-                         isConflict = true;
+                        isConflict = true;
                     }
                     // 更可靠的方式是检查 tsdav 返回的具体错误结构，但这需要调试或查阅文档
                     // 暂时基于错误消息字符串判断
 
                     if (isConflict) {
-                         console.warn(`[performFeishuCalDavSync] Detected 409 Conflict for event ${eventToPush.id}. Assuming it already exists on the server.`);
-                         // 更新本地事件状态，标记为已同步 (不再尝试推送)
-                         const indexToUpdate = eventsDb.findIndex(e => e.id === eventToPush.id);
-                         if (indexToUpdate !== -1) {
+                        console.warn(`[performFeishuCalDavSync] Detected 409 Conflict for event ${eventToPush.id}. Assuming it already exists on the server.`);
+                        // 更新本地事件状态，标记为已同步 (不再尝试推送)
+                        const indexToUpdate = eventsDb.findIndex(e => e.id === eventToPush.id);
+                        if (indexToUpdate !== -1) {
                             // --- DO NOTHING for 409 Conflict - Keep trying to push ---
                             console.warn(`[performFeishuCalDavSync] 409 Conflict for event ${eventToPush.id}. Event is NOT marked as synced locally and will be retried.`);
                             // We previously incorrectly marked the event as synced here.
                             // Now, we intentionally do nothing to the local event's status
                             // so that it will be attempted again on the next sync.
                             // -----------------------------------------------------------
-                         } else {
+                        } else {
                             console.error(`[performFeishuCalDavSync] Could not find local event ${eventToPush.id} to mark as synced after conflict.`);
-                         }
+                        }
                     }
                     // ---------------------------
                     else {
-                         // 其他错误处理
-                         if (pushError.message && pushError.message.includes('400')) {
-                             console.error('[performFeishuCalDavSync] Received 400 Bad Request. The generated ICS data might be invalid for Feishu.');
-                         } else if (pushError.message && pushError.message.includes('403')) {
-                              console.error('[performFeishuCalDavSync] Received 403 Forbidden. Check write permissions for the calendar or the App Password scope.');
-                         } else if (pushError.message && pushError.message.includes('50')) { // 5xx errors
-                              console.error('[performFeishuCalDavSync] Received 5xx Server Error from Feishu. Server issue?');
-                         }
-                         // 对于其他错误，目前不更新本地状态，下次还会尝试推送
+                        // 其他错误处理
+                        if (pushError.message && pushError.message.includes('400')) {
+                            console.error('[performFeishuCalDavSync] Received 400 Bad Request. The generated ICS data might be invalid for Feishu.');
+                        } else if (pushError.message && pushError.message.includes('403')) {
+                            console.error('[performFeishuCalDavSync] Received 403 Forbidden. Check write permissions for the calendar or the App Password scope.');
+                        } else if (pushError.message && pushError.message.includes('50')) { // 5xx errors
+                            console.error('[performFeishuCalDavSync] Received 5xx Server Error from Feishu. Server issue?');
+                        }
+                        // 对于其他错误，目前不更新本地状态，下次还会尝试推送
                     }
                 }
             }
@@ -3411,7 +3447,7 @@ ${iCalendarData}
             console.log(`[performFeishuCalDavSync] Saving updated eventsDb. Added: ${addedFromServerCount}, Removed: ${removedLocallyCount}, Pushed&Updated: ${updatedLocallyCount}`); // 更新日志
             await saveEvents(eventsDb);
         } else {
-             console.log('[performFeishuCalDavSync] No changes to eventsDb required after Feishu sync.');
+            console.log('[performFeishuCalDavSync] No changes to eventsDb required after Feishu sync.');
         }
 
         console.log('[performFeishuCalDavSync] Feishu CalDAV sync process finished.'); // 更新日志
@@ -3419,15 +3455,15 @@ ${iCalendarData}
         return { message: message, eventCount: addedFromServerCount + pushedToServerCount - removedLocallyCount }; // 更新计数
 
     } catch (error) {
-         console.error('[performFeishuCalDavSync] Error during Feishu CalDAV sync process:', error);
-         // 添加具体的错误处理，例如认证失败
-         if (error.message && (error.message.includes('401') || error.message.toLowerCase().includes('unauthorized'))) {
-             throw new Error(`Feishu CalDAV authentication failed. Please check your CalDAV username and the generated App Password. Original error: ${error.message}`);
-         } else if (error.message && error.message.includes('ECONNREFUSED')){
-             throw new Error(`Connection refused for Feishu CalDAV server (${targetServerUrl}). Check the server URL and network. Original error: ${error.message}`);
-         }
-         throw error; // Re-throw generic error
-    } 
+        console.error('[performFeishuCalDavSync] Error during Feishu CalDAV sync process:', error);
+        // 添加具体的错误处理，例如认证失败
+        if (error.message && (error.message.includes('401') || error.message.toLowerCase().includes('unauthorized'))) {
+            throw new Error(`Feishu CalDAV authentication failed. Please check your CalDAV username and the generated App Password. Original error: ${error.message}`);
+        } else if (error.message && error.message.includes('ECONNREFUSED')) {
+            throw new Error(`Connection refused for Feishu CalDAV server (${targetServerUrl}). Check the server URL and network. Original error: ${error.message}`);
+        }
+        throw error; // Re-throw generic error
+    }
 }
 
 // --- 新增：处理通用 CalDAV 同步逻辑 ---
@@ -3464,16 +3500,16 @@ async function performGenericCalDavSync() {
                 console.log(`  [${index}] Name: ${cal.displayName}, URL: ${cal.url}, ReadOnly: ${cal.readOnly}`);
             });
         } else {
-             console.log('[performGenericCalDavSync] No calendars found on the server.');
-             return { message: 'No calendars found on the server.', eventCount: 0 };
+            console.log('[performGenericCalDavSync] No calendars found on the server.');
+            return { message: 'No calendars found on the server.', eventCount: 0 };
         }
 
         // --- 恢复通用日历选择逻辑：优先 'Calendar' 或 '日历'，否则选第一个 ---
         let targetCalendar = calendars.find(cal => cal.displayName === 'Calendar' || cal.displayName === '日历') || calendars[0];
         if (!targetCalendar) {
-             // 如果连第一个都没有，上面已经处理过了
-              console.error('[performGenericCalDavSync] No suitable calendar found.');
-              return { message: 'No suitable calendar found on server.', eventCount: -1, error: true };
+            // 如果连第一个都没有，上面已经处理过了
+            console.error('[performGenericCalDavSync] No suitable calendar found.');
+            return { message: 'No suitable calendar found on server.', eventCount: -1, error: true };
         }
         // ---------------------------------------------------------------------
         console.log(`[performGenericCalDavSync] Syncing calendar: ${targetCalendar.displayName} (${targetCalendar.url})`);
@@ -3502,7 +3538,7 @@ ${obj.data}
 ------ END GENERIC ICS ------`);
             // --------------------
 
-             try {
+            try {
                 const parsedEvents = ical.parseICS(obj.data);
                 for (const key in parsedEvents) {
                     if (parsedEvents[key].type === 'VEVENT') {
@@ -3514,10 +3550,10 @@ ${obj.data}
                         eventsFromServerMap.set(uniqueId, { etag: obj.etag, data: vevent });
 
                         const eventStartDate = vevent.start ? new Date(vevent.start) : null;
-                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600*1000) : null);
+                        const eventEndDate = vevent.end ? new Date(vevent.end) : (eventStartDate ? new Date(eventStartDate.getTime() + 3600 * 1000) : null);
 
                         if (eventStartDate && eventEndDate && !isNaN(eventStartDate) && !isNaN(eventEndDate)) {
-                             const eventData = {
+                            const eventData = {
                                 id: uniqueId,
                                 title: vevent.summary || '无标题事件',
                                 start_datetime: eventStartDate.toISOString(),
@@ -3553,7 +3589,7 @@ ${obj.data}
 
         let addedFromServerCount = 0;
         if (newOrUpdatedEvents.length > 0) {
-             console.log(`[performGenericCalDavSync] Found ${newOrUpdatedEvents.length} new events from Generic server to add locally.`);
+            console.log(`[performGenericCalDavSync] Found ${newOrUpdatedEvents.length} new events from Generic server to add locally.`);
             eventsDb = [...eventsDb, ...newOrUpdatedEvents];
             addedFromServerCount = newOrUpdatedEvents.length;
         }
@@ -3562,15 +3598,15 @@ ${obj.data}
         eventsDb = eventsDb.filter(localEvent => {
             if (localEvent.source === 'caldav_sync_generic') { // <-- 检查通用来源
                 if (!eventsFromServerMap.has(localEvent.id)) {
-                     console.log(`[performGenericCalDavSync] Removing local event ${localEvent.id} (source: Generic) as it's no longer on the server.`);
-                     removedLocallyCount++;
-                     return false;
+                    console.log(`[performGenericCalDavSync] Removing local event ${localEvent.id} (source: Generic) as it's no longer on the server.`);
+                    removedLocallyCount++;
+                    return false;
                 }
             }
             return true;
         });
-        if(removedLocallyCount > 0) {
-             console.log(`[performGenericCalDavSync] Removed ${removedLocallyCount} local events that were deleted from Generic server.`);
+        if (removedLocallyCount > 0) {
+            console.log(`[performGenericCalDavSync] Removed ${removedLocallyCount} local events that were deleted from Generic server.`);
         }
 
         // --- 推送逻辑 (使用标准推送，类似飞书逻辑但不含特殊 User-Agent) ---
@@ -3587,14 +3623,14 @@ ${obj.data}
         // --- 修改：仅当有事件要处理时才定义函数，并移到循环外 ---
         if (eventsToPush.length > 0) {
             // --- 将函数定义移到循环外部 ---
-                    const formatUtcIcsDateArray = (dateString) => {
-                        if (!dateString) return undefined;
-                        const date = new Date(dateString);
-                        if (dateString.length === 10 && dateString.indexOf('T') === -1) {
-                            return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()];
-                        }
-                        return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds()];
-                    };
+            const formatUtcIcsDateArray = (dateString) => {
+                if (!dateString) return undefined;
+                const date = new Date(dateString);
+                if (dateString.length === 10 && dateString.indexOf('T') === -1) {
+                    return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()];
+                }
+                return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds()];
+            };
             // --------------------------------
 
             for (const eventToPush of eventsToPush) {
@@ -3619,21 +3655,21 @@ ${obj.data}
                     // 处理全天事件的结束日期和透明度
                     let isAllDay = eventToPush.start_datetime && eventToPush.start_datetime.length === 10 && (!eventToPush.end_datetime || eventToPush.end_datetime.length === 10);
                     if (isAllDay) {
-                         eventAttributes.transp = 'TRANSPARENT';
-                         delete eventAttributes.startOutputType;
-                         if (eventToPush.end_datetime) {
-                             eventAttributes.end = formatUtcIcsDateArray(eventToPush.end_datetime);
-                         } else {
-                             const startDate = new Date(eventToPush.start_datetime + 'T00:00:00Z');
-                             const endDate = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
-                             eventAttributes.end = [endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, endDate.getUTCDate()];
-                         }
+                        eventAttributes.transp = 'TRANSPARENT';
+                        delete eventAttributes.startOutputType;
+                        if (eventToPush.end_datetime) {
+                            eventAttributes.end = formatUtcIcsDateArray(eventToPush.end_datetime);
+                        } else {
+                            const startDate = new Date(eventToPush.start_datetime + 'T00:00:00Z');
+                            const endDate = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+                            eventAttributes.end = [endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, endDate.getUTCDate()];
+                        }
                     } else {
-                         eventAttributes.transp = 'OPAQUE';
-                         if (eventToPush.end_datetime) {
-                             eventAttributes.end = formatUtcIcsDateArray(eventToPush.end_datetime);
-                             eventAttributes.endOutputType = 'utc';
-                         }
+                        eventAttributes.transp = 'OPAQUE';
+                        if (eventToPush.end_datetime) {
+                            eventAttributes.end = formatUtcIcsDateArray(eventToPush.end_datetime);
+                            eventAttributes.endOutputType = 'utc';
+                        }
                     }
 
                     let iCalendarData = '';
@@ -3651,11 +3687,11 @@ ${obj.data}
                     }
 
                     if (!iCalendarData || !iCalendarData.includes('BEGIN:VEVENT')) {
-                         console.error("[performGenericCalDavSync] Standard ICS generation failed.");
-                         throw new Error('Standard ICS generation failed.');
+                        console.error("[performGenericCalDavSync] Standard ICS generation failed.");
+                        throw new Error('Standard ICS generation failed.');
                     }
-                    
-                    const filename = `${eventToPush.id}.ics`; 
+
+                    const filename = `${eventToPush.id}.ics`;
                     // --- 添加日志：打印最终发送给 Generic 服务器的 ICS --- 
                     console.log(`[performGenericCalDavSync] Final iCalendar data being sent to Generic Server for ${filename}:
 ------ BEGIN GENERIC PUSH ICS ------
@@ -3679,14 +3715,14 @@ ${iCalendarData}
                             eventsDb[indexToUpdate].caldav_uid = eventToPush.id;
                             eventsDb[indexToUpdate].caldav_etag = createResult.etag;
                             eventsDb[indexToUpdate].needs_caldav_push = false;
-                            eventsDb[indexToUpdate].source = 'caldav_sync_generic'; 
+                            eventsDb[indexToUpdate].source = 'caldav_sync_generic';
                             updatedLocallyCount++;
                             console.log(`[performGenericCalDavSync] Updated local event ${eventToPush.id} with Generic CalDAV info.`);
                         } else {
-                             console.warn(`[performGenericCalDavSync] Could not find local event ${eventToPush.id} to update after successful push.`);
+                            console.warn(`[performGenericCalDavSync] Could not find local event ${eventToPush.id} to update after successful push.`);
                         }
                     } else {
-                         console.error(`[performGenericCalDavSync] Failed to create ${filename} on Generic server. createResult:`, createResult);
+                        console.error(`[performGenericCalDavSync] Failed to create ${filename} on Generic server. createResult:`, createResult);
                     }
 
                 } catch (pushError) {
@@ -3695,30 +3731,30 @@ ${iCalendarData}
                     // --- 保留 409 Conflict 处理 ---
                     let isConflict = false;
                     if (pushError && pushError.message && pushError.message.includes('409')) {
-                         isConflict = true;
+                        isConflict = true;
                     }
 
                     if (isConflict) {
-                         console.warn(`[performGenericCalDavSync] Detected 409 Conflict for event ${eventToPush.id}. Assuming it already exists on the server. Marking as synced locally.`);
-                         const indexToUpdate = eventsDb.findIndex(e => e.id === eventToPush.id);
-                         if (indexToUpdate !== -1) {
-                              // --- 标记为已解决冲突 ---
-                              eventsDb[indexToUpdate].needs_caldav_push = false; // 不再尝试推送
-                              // 可以考虑从服务器获取 etag，但暂时先标记为不同步
-                              // eventsDb[indexToUpdate].caldav_etag = 'CONFLICT_RESOLVED'; 
-                              console.log(`[performGenericCalDavSync] Marked event ${eventToPush.id} as synced locally due to 409 conflict.`);
-                              updatedLocallyCount++; // 算作一次本地更新
-                         }
+                        console.warn(`[performGenericCalDavSync] Detected 409 Conflict for event ${eventToPush.id}. Assuming it already exists on the server. Marking as synced locally.`);
+                        const indexToUpdate = eventsDb.findIndex(e => e.id === eventToPush.id);
+                        if (indexToUpdate !== -1) {
+                            // --- 标记为已解决冲突 ---
+                            eventsDb[indexToUpdate].needs_caldav_push = false; // 不再尝试推送
+                            // 可以考虑从服务器获取 etag，但暂时先标记为不同步
+                            // eventsDb[indexToUpdate].caldav_etag = 'CONFLICT_RESOLVED'; 
+                            console.log(`[performGenericCalDavSync] Marked event ${eventToPush.id} as synced locally due to 409 conflict.`);
+                            updatedLocallyCount++; // 算作一次本地更新
+                        }
                     }
                     // --- 结束 409 处理 ---
                     else {
-                         if (pushError.message && pushError.message.includes('400')) {
-                             console.error('[performGenericCalDavSync] Received 400 Bad Request. The generated ICS data might be invalid.');
-                         } else if (pushError.message && pushError.message.includes('403')) {
-                              console.error('[performGenericCalDavSync] Received 403 Forbidden. Check write permissions.');
-                         } else if (pushError.message && pushError.message.includes('50')) {
-                              console.error('[performGenericCalDavSync] Received 5xx Server Error.');
-                         }
+                        if (pushError.message && pushError.message.includes('400')) {
+                            console.error('[performGenericCalDavSync] Received 400 Bad Request. The generated ICS data might be invalid.');
+                        } else if (pushError.message && pushError.message.includes('403')) {
+                            console.error('[performGenericCalDavSync] Received 403 Forbidden. Check write permissions.');
+                        } else if (pushError.message && pushError.message.includes('50')) {
+                            console.error('[performGenericCalDavSync] Received 5xx Server Error.');
+                        }
                     }
                 }
             }
@@ -3730,7 +3766,7 @@ ${iCalendarData}
             console.log(`[performGenericCalDavSync] Saving updated eventsDb. Added: ${addedFromServerCount}, Removed: ${removedLocallyCount}, UpdatedLocally: ${updatedLocallyCount}`);
             await saveEvents(eventsDb);
         } else {
-             console.log('[performGenericCalDavSync] No changes to eventsDb required after Generic sync.');
+            console.log('[performGenericCalDavSync] No changes to eventsDb required after Generic sync.');
         }
 
         console.log('[performGenericCalDavSync] Generic CalDAV sync process finished.');
@@ -3738,34 +3774,34 @@ ${iCalendarData}
         return { message: message, eventCount: addedFromServerCount + pushedToServerCount - removedLocallyCount };
 
     } catch (error) {
-         console.error('[performGenericCalDavSync] Error during Generic CalDAV sync process:', error);
-         if (error.message && (error.message.includes('401') || error.message.toLowerCase().includes('unauthorized'))) {
-             throw new Error(`Generic CalDAV authentication failed. Check username/password. Original error: ${error.message}`);
-         } else if (error.message && error.message.includes('ECONNREFUSED')){ 
-             throw new Error(`Connection refused for Generic CalDAV server (${targetServerUrl}). Check URL/network. Original error: ${error.message}`);
-         } else if (error.message && (error.message.includes('ENOTFOUND') || error.message.includes('EAI_AGAIN'))) {
-             throw new Error(`Could not resolve Generic CalDAV server address (${targetServerUrl}). Check URL/DNS. Original error: ${error.message}`);
-         }
-         throw error; // Re-throw generic error
+        console.error('[performGenericCalDavSync] Error during Generic CalDAV sync process:', error);
+        if (error.message && (error.message.includes('401') || error.message.toLowerCase().includes('unauthorized'))) {
+            throw new Error(`Generic CalDAV authentication failed. Check username/password. Original error: ${error.message}`);
+        } else if (error.message && error.message.includes('ECONNREFUSED')) {
+            throw new Error(`Connection refused for Generic CalDAV server (${targetServerUrl}). Check URL/network. Original error: ${error.message}`);
+        } else if (error.message && (error.message.includes('ENOTFOUND') || error.message.includes('EAI_AGAIN'))) {
+            throw new Error(`Could not resolve Generic CalDAV server address (${targetServerUrl}). Check URL/DNS. Original error: ${error.message}`);
+        }
+        throw error; // Re-throw generic error
     }
 }
 
 // --- 重构后的主 CalDAV 同步函数 (分发器) ---
 async function performCalDavSync() {
-     if (isCalDavSyncRunning) {
+    if (isCalDavSyncRunning) {
         console.log('[CalDAV Dispatcher] Sync is already running. Skipping this run.');
         return { message: "Sync already in progress", eventCount: 0 };
     }
     isCalDavSyncRunning = true;
     console.log('[CalDAV Dispatcher] Starting scheduled CalDAV sync...');
-    
+
     const currentSettings = caldavSettings;
     if (!currentSettings || !currentSettings.username || !currentSettings.password || !currentSettings.serverUrl) {
         console.error('[CalDAV Dispatcher] CalDAV settings not fully configured.');
         isCalDavSyncRunning = false;
         return { message: 'CalDAV settings not fully configured.', eventCount: -1, error: true };
     }
-    
+
     try {
         // 检查是否是 QQ CalDAV
         if (currentSettings.serverUrl.toLowerCase().includes('dav.qq.com')) {
@@ -3802,12 +3838,12 @@ async function performCalDavSync() {
             }
         }
     } catch (error) {
-         // 这个 catch 理论上只会在 QQ 同步直接抛出错误时触发 (因为其他分支有自己的 try/catch)
-         console.error('[CalDAV Dispatcher] Unexpected error during CalDAV sync process:', error);
-         isCalDavSyncRunning = false; // 确保释放锁
-          // throw error; // 可以重新抛出，让上层处理
-         // 或者返回错误信息
-         return { message: `CalDAV sync failed unexpectedly: ${error.message}`, eventCount: -1, error: true };
+        // 这个 catch 理论上只会在 QQ 同步直接抛出错误时触发 (因为其他分支有自己的 try/catch)
+        console.error('[CalDAV Dispatcher] Unexpected error during CalDAV sync process:', error);
+        isCalDavSyncRunning = false; // 确保释放锁
+        // throw error; // 可以重新抛出，让上层处理
+        // 或者返回错误信息
+        return { message: `CalDAV sync failed unexpectedly: ${error.message}`, eventCount: -1, error: true };
     }
 }
 
@@ -3834,7 +3870,7 @@ app.post('/events/import', authenticateUser, upload.single('documentFile'), asyn
             return res.status(400).json({ error: '不支持的文件类型。请上传 .txt 或 .docx 文件。' });
         }
         if (!documentText) {
-             return res.status(400).json({ error: '无法从文件中提取文本内容，或者文件为空。' });
+            return res.status(400).json({ error: '无法从文件中提取文本内容，或者文件为空。' });
         }
 
         // --- LLM Parsing Logic --- 
@@ -3848,23 +3884,23 @@ app.post('/events/import', authenticateUser, upload.single('documentFile'), asyn
         }
         // Check for required API key for OpenAI/Deepseek
         if ((currentLlmSettings.provider === 'openai' || currentLlmSettings.provider === 'deepseek') && !currentLlmSettings.api_key) {
-             console.error(`[Import] API key missing for ${currentLlmSettings.provider}.`);
-             return res.status(409).json({ error: `缺少 ${currentLlmSettings.provider} 的 API Key。请在设置中配置。` });
+            console.error(`[Import] API key missing for ${currentLlmSettings.provider}.`);
+            return res.status(409).json({ error: `缺少 ${currentLlmSettings.provider} 的 API Key。请在设置中配置。` });
         }
 
         // 2. Initialize LLM Client (Example using OpenAI library)
         let openaiClient;
         let modelToUse = currentLlmSettings.model_name || 'gpt-3.5-turbo'; // Default model
         try {
-             openaiClient = new OpenAI({
-                 apiKey: currentLlmSettings.api_key, // Required for OpenAI/Deepseek
-                 baseURL: currentLlmSettings.base_url || (currentLlmSettings.provider === 'deepseek' ? 'https://api.deepseek.com/v1' : undefined), // Set base URL for Deepseek or custom OpenAI-compatible
-             });
-             // Potentially adjust model name based on provider if needed
-             if (currentLlmSettings.provider === 'deepseek' && !currentLlmSettings.model_name) {
-                  modelToUse = 'deepseek-chat'; // Default deepseek model
-             }
-             console.log(`[Import] Initialized LLM client for provider: ${currentLlmSettings.provider}, using model: ${modelToUse}, baseURL: ${openaiClient.baseURL}`);
+            openaiClient = new OpenAI({
+                apiKey: currentLlmSettings.api_key, // Required for OpenAI/Deepseek
+                baseURL: currentLlmSettings.base_url || (currentLlmSettings.provider === 'deepseek' ? 'https://api.deepseek.com/v1' : undefined), // Set base URL for Deepseek or custom OpenAI-compatible
+            });
+            // Potentially adjust model name based on provider if needed
+            if (currentLlmSettings.provider === 'deepseek' && !currentLlmSettings.model_name) {
+                modelToUse = 'deepseek-chat'; // Default deepseek model
+            }
+            console.log(`[Import] Initialized LLM client for provider: ${currentLlmSettings.provider}, using model: ${modelToUse}, baseURL: ${openaiClient.baseURL}`);
         } catch (initError) {
             console.error("[Import] Failed to initialize LLM client:", initError);
             return res.status(500).json({ error: `初始化LLM客户端失败: ${initError instanceof Error ? initError.message : String(initError)}` });
@@ -3914,11 +3950,11 @@ JSON 数组结果：
             // Provide more context in the error message
             let detail = llmError instanceof Error ? llmError.message : String(llmError);
             if (detail.includes('authentication')) {
-                 detail = 'LLM 身份验证失败，请检查 API Key。' + ` (${detail})`;
+                detail = 'LLM 身份验证失败，请检查 API Key。' + ` (${detail})`;
             } else if (detail.includes('rate limit')) {
-                 detail = '已达到 LLM API 速率限制。' + ` (${detail})`;
-            } else if (detail.includes('not found') && detail.includes('model')){
-                 detail = `指定的模型 '${modelToUse}' 未找到或不可用。` + ` (${detail})`;
+                detail = '已达到 LLM API 速率限制。' + ` (${detail})`;
+            } else if (detail.includes('not found') && detail.includes('model')) {
+                detail = `指定的模型 '${modelToUse}' 未找到或不可用。` + ` (${detail})`;
             }
             return res.status(500).json({ error: `调用 LLM 解析失败: ${detail}` });
         }
@@ -3930,7 +3966,7 @@ JSON 数组结果：
             // Robust parsing:
             let jsonData;
             try {
-                 jsonData = JSON.parse(llmResponseContent);
+                jsonData = JSON.parse(llmResponseContent);
             } catch (e) {
                 // If direct parsing fails, try finding JSON array within the string
                 const jsonMatch = llmResponseContent.match(/(\[[\s\S]*?\])/);
@@ -3941,7 +3977,7 @@ JSON 数组结果：
                     throw new Error('无法解析 LLM 返回的 JSON 响应。内容: ' + llmResponseContent.substring(0, 100) + '...');
                 }
             }
-            
+
             // Check if the parsed data is an array
             if (!Array.isArray(jsonData)) {
                 // Sometimes the model wraps the array in a key, e.g., { "events": [...] }
@@ -3949,12 +3985,12 @@ JSON 数组结果：
                 const arrayKey = Object.keys(jsonData).find(key => Array.isArray(jsonData[key]));
                 if (arrayKey) {
                     console.warn(`[Import] LLM response was an object, using array found under key '${arrayKey}'`);
-                     parsedEventsFromLLM = jsonData[arrayKey];
+                    parsedEventsFromLLM = jsonData[arrayKey];
                 } else {
                     throw new Error('LLM 返回的 JSON 格式不正确，期望得到一个数组。收到的: ' + JSON.stringify(jsonData).substring(0, 100) + '...');
                 }
             } else {
-                 parsedEventsFromLLM = jsonData;
+                parsedEventsFromLLM = jsonData;
             }
 
             // Validate the structure of each item
@@ -3972,18 +4008,18 @@ JSON 数组结果：
         // 6. Create event objects and save
         const newEvents = [];
         const parseDateString = (dateStr) => {
-             if (!dateStr) return null;
-             // LLM should return YYYY-MM-DD, directly usable by new Date()
-             const date = new Date(dateStr.trim()); // Allow for potential whitespace
-             if (isNaN(date.getTime())) {
-                 console.warn(`[Import-LLM] 无效的日期字符串: ${dateStr}`);
-                 return null;
-             } 
-             if(date.getFullYear() < 2000 || date.getFullYear() > 2100) {
-                  console.warn(`[Import-LLM] 解析出的年份不合理: ${date.getFullYear()} from ${dateStr}`);
-                  return null;
-             }
-             return date;
+            if (!dateStr) return null;
+            // LLM should return YYYY-MM-DD, directly usable by new Date()
+            const date = new Date(dateStr.trim()); // Allow for potential whitespace
+            if (isNaN(date.getTime())) {
+                console.warn(`[Import-LLM] 无效的日期字符串: ${dateStr}`);
+                return null;
+            }
+            if (date.getFullYear() < 2000 || date.getFullYear() > 2100) {
+                console.warn(`[Import-LLM] 解析出的年份不合理: ${date.getFullYear()} from ${dateStr}`);
+                return null;
+            }
+            return date;
         };
 
         for (const item of parsedEventsFromLLM) {
@@ -3994,43 +4030,43 @@ JSON 数组结果：
                 newEvents.push({
                     id: uuidv4(),
                     title: item.title.trim(),
-                    start_datetime: startDate.toISOString(), 
+                    start_datetime: startDate.toISOString(),
                     end_datetime: endDate.toISOString(),
-                    is_all_day: true, 
-                    completed: false, 
+                    is_all_day: true,
+                    completed: false,
                     source: 'llm_import',
                     userId: userId, // 添加用户ID
-                    created_at: new Date().toISOString(), 
+                    created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString(),
                     needs_caldav_push: true, // <-- 添加推送标记
                     caldav_uid: null,      // <-- 确保初始为空
                     caldav_etag: null       // <-- 确保初始为空
                 });
             } else {
-                 console.warn(`[Import-LLM] Skipped event from LLM due to missing title or invalid date:`, item);
+                console.warn(`[Import-LLM] Skipped event from LLM due to missing title or invalid date:`, item);
             }
         }
 
         if (newEvents.length > 0) {
             // 加载用户的事件数据
             let userEvents = await loadEvents(userId);
-            
+
             // 添加新导入的事件
             userEvents = [...userEvents, ...newEvents];
-            
+
             // 保存到用户特定的文件
             await saveEvents(userEvents, userId);
             console.log(`[用户 ${req.user.username}] 通过LLM成功导入并保存了 ${newEvents.length} 个事件`);
-            
+
             // 立即触发CalDAV同步
             triggerImmediateCalDavSync(userId, 'LLM文档导入事件创建').catch(syncError => {
                 console.error(`[用户 ${req.user.username}] 导入事件后立即同步失败:`, syncError);
             });
-            
+
             res.status(200).json({ message: `通过 LLM 成功导入 ${newEvents.length} 个事件。`, count: newEvents.length });
         } else {
             console.log(`[用户 ${req.user.username}] LLM 未返回任何有效事件`);
-            res.status(200).json({ message: 'LLM 已处理文档，但未解析出任何有效事件。' , count: 0 });
+            res.status(200).json({ message: 'LLM 已处理文档，但未解析出任何有效事件。', count: 0 });
         }
 
     } catch (error) {
@@ -4063,22 +4099,22 @@ app.post('/sync/caldav', authenticateUser, async (req, res) => {
             } else {
                 // 同步成功或无新事件
                 console.log(`[/sync/caldav Route] Sync seems successful: ${syncResult.message}`);
-                return res.status(200).json({ 
+                return res.status(200).json({
                     message: syncResult.message || 'Sync completed.',
-                    eventCount: syncResult.eventCount || 0 
+                    eventCount: syncResult.eventCount || 0
                 });
             }
         } else {
-             // 如果 performCalDavSyncForUser 返回了非对象或 null/undefined
-             console.error("[/sync/caldav Route] performCalDavSyncForUser returned an unexpected result type:", syncResult);
-             return res.status(500).json({ error: 'CalDAV sync function returned an unexpected result format.' });
+            // 如果 performCalDavSyncForUser 返回了非对象或 null/undefined
+            console.error("[/sync/caldav Route] performCalDavSyncForUser returned an unexpected result type:", syncResult);
+            return res.status(500).json({ error: 'CalDAV sync function returned an unexpected result format.' });
         }
 
     } catch (routeError) {
         // 捕获 performCalDavSyncForUser 抛出的错误 或 路由处理中的其他错误
         console.error("[/sync/caldav Route] Caught unexpected error in route handler:", routeError);
         // 确保返回 JSON 格式的错误
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: 'An unexpected error occurred during CalDAV sync.',
             details: routeError instanceof Error ? routeError.message : String(routeError)
         });
@@ -4111,11 +4147,11 @@ app.get('/config/imap-filter', optionalAuth, async (req, res) => {
 
 app.post('/config/imap-filter', optionalAuth, async (req, res) => {
     const newSettings = req.body;
-    if (!newSettings || !Array.isArray(newSettings.sender_allowlist) || 
+    if (!newSettings || !Array.isArray(newSettings.sender_allowlist) ||
         !newSettings.sender_allowlist.every(item => typeof item === 'string')) {
         return res.status(400).json({ error: '无效的IMAP过滤器设置格式。应为 { sender_allowlist: ["email1@example.com"] }.' });
     }
-    
+
     const cleanedAllowlist = newSettings.sender_allowlist
         .map(email => email.trim().toLowerCase())
         .filter(email => email.length > 0);
@@ -4127,16 +4163,16 @@ app.post('/config/imap-filter', optionalAuth, async (req, res) => {
     try {
         // 使用新的设置服务保存IMAP过滤设置
         const success = await newSettingsService.saveImapFilterSettings(settingsToSave, userId, userInfo);
-        
+
         if (success) {
             // 更新内存缓存
-        imapFilterSettings = { ...settingsToSave };
-        
-        res.status(200).json({ 
-            message: 'IMAP发件人白名单已保存。', 
-            settings: imapFilterSettings,
+            imapFilterSettings = { ...settingsToSave };
+
+            res.status(200).json({
+                message: 'IMAP发件人白名单已保存。',
+                settings: imapFilterSettings,
                 syncedToUnified: await newSettingsService.isUnifiedServiceAvailable()
-        });
+            });
         } else {
             throw new Error('设置管理器保存失败');
         }
@@ -4149,7 +4185,7 @@ app.post('/config/imap-filter', optionalAuth, async (req, res) => {
 // --- IMAP 同步路由 ---
 app.post('/sync/imap', authenticateUser, async (req, res) => {
     console.log(`[POST /sync/imap] 用户 ${req.user.username} (${req.user.id}) 触发IMAP同步，使用AI智能识别邮件中的日程事件...`);
-    
+
     try {
         // 提取用户token用于设置获取
         const authHeader = req.headers.authorization;
@@ -4222,7 +4258,7 @@ app.post('/sync/imap', authenticateUser, async (req, res) => {
                 });
             } else {
                 console.log(`[/sync/imap Route] Sync successful: ${syncResult.message}`);
-                return res.status(200).json({ 
+                return res.status(200).json({
                     message: syncResult.message || 'AI已完成邮件分析和事件提取。',
                     count: syncResult.eventCount || 0
                 });
@@ -4234,7 +4270,7 @@ app.post('/sync/imap', authenticateUser, async (req, res) => {
 
     } catch (routeError) {
         console.error("[/sync/imap Route] Caught error in route handler:", routeError);
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: 'IMAP同步过程中发生意外错误。',
             details: routeError instanceof Error ? routeError.message : String(routeError)
         });
@@ -4245,12 +4281,12 @@ app.post('/sync/imap', authenticateUser, async (req, res) => {
 app.post('/debug/reset-llm-cache', authenticateUser, async (req, res) => {
     try {
         const userId = getCurrentUserId(req);
-        
+
         // 强制重置缓存
         forceResetLlmCache();
-        
+
         console.log(`[Debug] 用户 ${userId} 的LLM缓存已重置`);
-        
+
         res.json({
             message: `用户 ${userId} 的LLM配置缓存已重置，下次调用将获取最新配置`,
             timestamp: new Date().toISOString()
@@ -4267,12 +4303,12 @@ app.post('/debug/reset-llm-cache', authenticateUser, async (req, res) => {
 app.post('/debug/reset-imap-lock', authenticateUser, async (req, res) => {
     try {
         const userId = getCurrentUserId(req);
-        
+
         // 重置IMAP同步锁
         isImapSyncRunning = false;
-        
+
         console.log(`[Debug] 用户 ${userId} 重置了IMAP同步锁`);
-        
+
         res.json({
             message: 'IMAP同步锁已重置，现在可以重新进行同步',
             timestamp: new Date().toISOString()
