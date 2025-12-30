@@ -19,6 +19,11 @@ const {
     loadCalDAVSettings, saveCalDAVSettings,
     loadImapFilterSettings, saveImapFilterSettings, // <-- 添加新的导入
     migrateGlobalEventsToUser,
+    loadTodos, saveTodos,
+    getTodo, addTodo, updateTodo, deleteTodo,
+    convertTodoToEvent,
+    addTodosFromImap,
+    getTodoStats,
     migrateGlobalSettingsToUser,
     cleanupMigratedEvents,
     uuidv4
@@ -4007,6 +4012,7 @@ JSON 数组结果：
 
         // 6. Create event objects and save
         const newEvents = [];
+        const newTodos = [];
         const parseDateString = (dateStr) => {
             if (!dateStr) return null;
             // LLM should return YYYY-MM-DD, directly usable by new Date()
@@ -4042,12 +4048,19 @@ JSON 数组结果：
                     caldav_uid: null,      // <-- 确保初始为空
                     caldav_etag: null       // <-- 确保初始为空
                 });
+            } else if (item.title) {
+                console.log(`[Import-LLM] 事件缺少日期，保存到待办事项: ${item.title}`);
+                newTodos.push({
+                    title: item.title.trim(),
+                    description: item.description || '',
+                    priority: item.priority || 'medium'
+                });
             } else {
-                console.warn(`[Import-LLM] Skipped event from LLM due to missing title or invalid date:`, item);
+                console.warn(`[Import-LLM] Skipped event from LLM due to missing title:`, item);
             }
         }
 
-        if (newEvents.length > 0) {
+        if (newEvents.length > 0 || newTodos.length > 0) {
             // 加载用户的事件数据
             let userEvents = await loadEvents(userId);
 
@@ -4063,10 +4076,28 @@ JSON 数组结果：
                 console.error(`[用户 ${req.user.username}] 导入事件后立即同步失败:`, syncError);
             });
 
-            res.status(200).json({ message: `通过 LLM 成功导入 ${newEvents.length} 个事件。`, count: newEvents.length });
+            // 保存待办事项
+            if (newTodos.length > 0) {
+                const addedTodos = addTodosFromImap(userId, newTodos);
+                console.log(`[用户 ${req.user.username}] 通过LLM成功保存了 ${addedTodos.length} 个待办事项`);
+            }
+
+            res.status(200).json({ 
+                message: `通过 LLM 成功导入 ${newEvents.length} 个事件，${newTodos.length} 个待办事项。`, 
+                count: newEvents.length,
+                todoCount: newTodos.length
+            });
+        } else if (newTodos.length > 0) {
+            const addedTodos = addTodosFromImap(userId, newTodos);
+            console.log(`[用户 ${req.user.username}] 通过LLM成功保存了 ${addedTodos.length} 个待办事项`);
+            res.status(200).json({ 
+                message: `通过 LLM 成功保存 ${addedTodos.length} 个待办事项。`, 
+                count: 0,
+                todoCount: addedTodos.length
+            });
         } else {
-            console.log(`[用户 ${req.user.username}] LLM 未返回任何有效事件`);
-            res.status(200).json({ message: 'LLM 已处理文档，但未解析出任何有效事件。', count: 0 });
+            console.log(`[用户 ${req.user.username}] LLM 未返回任何有效事件或待办事项`);
+            res.status(200).json({ message: 'LLM 已处理文档，但未解析出任何有效事件或待办事项。', count: 0, todoCount: 0 });
         }
 
     } catch (error) {
@@ -4350,3 +4381,169 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 });
 
 // 已删除重复的LLM设置定义
+
+// ============== 待办事项 API ==============
+
+app.get('/todos', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const todos = loadTodos(userId);
+        res.json(todos);
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 获取待办事项列表失败:`, error);
+        res.status(500).json({ error: '获取待办事项列表失败' });
+    }
+});
+
+app.get('/todos/stats', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const stats = getTodoStats(userId);
+        res.json(stats);
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 获取待办事项统计失败:`, error);
+        res.status(500).json({ error: '获取待办事项统计失败' });
+    }
+});
+
+app.get('/todos/:id', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const todo = getTodo(userId, req.params.id);
+        if (!todo) {
+            return res.status(404).json({ error: '待办事项不存在' });
+        }
+        res.json(todo);
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 获取待办事项失败:`, error);
+        res.status(500).json({ error: '获取待办事项失败' });
+    }
+});
+
+app.post('/todos', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const { title, description, priority, scheduled_date, tags } = req.body;
+
+        if (!title || title.trim() === '') {
+            return res.status(400).json({ error: '待办事项标题不能为空' });
+        }
+
+        const newTodo = addTodo(userId, {
+            title: title.trim(),
+            description: description || '',
+            priority: priority || 'medium',
+            scheduled_date: scheduled_date || null,
+            tags: tags || []
+        });
+
+        res.status(201).json(newTodo);
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 创建待办事项失败:`, error);
+        res.status(500).json({ error: '创建待办事项失败' });
+    }
+});
+
+app.put('/todos/:id', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const { title, description, status, priority, scheduled_date, tags } = req.body;
+
+        const updates = {};
+        if (title !== undefined) updates.title = title.trim();
+        if (description !== undefined) updates.description = description;
+        if (status !== undefined) updates.status = status;
+        if (priority !== undefined) updates.priority = priority;
+        if (scheduled_date !== undefined) updates.scheduled_date = scheduled_date;
+        if (tags !== undefined) updates.tags = tags;
+
+        const updatedTodo = updateTodo(userId, req.params.id, updates);
+        if (!updatedTodo) {
+            return res.status(404).json({ error: '待办事项不存在' });
+        }
+
+        res.json(updatedTodo);
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 更新待办事项失败:`, error);
+        res.status(500).json({ error: '更新待办事项失败' });
+    }
+});
+
+app.delete('/todos/:id', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const success = deleteTodo(userId, req.params.id);
+        if (!success) {
+            return res.status(404).json({ error: '待办事项不存在' });
+        }
+        res.json({ success: true, message: '待办事项已删除' });
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 删除待办事项失败:`, error);
+        res.status(500).json({ error: '删除待办事项失败' });
+    }
+});
+
+app.post('/todos/:id/convert', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const todoId = req.params.id;
+
+        const todo = getTodo(userId, todoId);
+        if (!todo) {
+            return res.status(404).json({ error: '待办事项不存在' });
+        }
+
+        if (!todo.scheduled_date) {
+            return res.status(400).json({ error: '待办事项没有设置日期，无法转换为日程' });
+        }
+
+        const event = convertTodoToEvent(userId, todoId);
+        if (!event) {
+            return res.status(500).json({ error: '转换为日程失败' });
+        }
+
+        res.json({
+            success: true,
+            message: '已转换为日程事件',
+            event: event
+        });
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 转换待办事项为日程失败:`, error);
+        res.status(500).json({ error: '转换待办事项为日程失败' });
+    }
+});
+
+app.post('/todos/:id/schedule', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const { scheduled_date } = req.body;
+
+        if (!scheduled_date) {
+            return res.status(400).json({ error: '请提供日期时间' });
+        }
+
+        const updatedTodo = updateTodo(userId, req.params.id, { scheduled_date });
+        if (!updatedTodo) {
+            return res.status(404).json({ error: '待办事项不存在' });
+        }
+
+        res.json(updatedTodo);
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 设置待办事项日期失败:`, error);
+        res.status(500).json({ error: '设置待办事项日期失败' });
+    }
+});
+
+app.put('/todos/:id/complete', authenticateUser, async (req, res) => {
+    try {
+        const userId = getCurrentUserId(req);
+        const updatedTodo = updateTodo(userId, req.params.id, { status: 'completed' });
+        if (!updatedTodo) {
+            return res.status(404).json({ error: '待办事项不存在' });
+        }
+        res.json(updatedTodo);
+    } catch (error) {
+        console.error(`[用户 ${req.user?.username}] 完成待办事项失败:`, error);
+        res.status(500).json({ error: '完成待办事项失败' });
+    }
+});

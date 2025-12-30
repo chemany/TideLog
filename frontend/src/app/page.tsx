@@ -1,6 +1,7 @@
 "use client";
 
 import { getApiBaseUrl, authenticatedFetch } from '../config';
+import { todoService } from "../services/todoService";
 
 // ... 其余 import 保持不变 ...
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -14,7 +15,7 @@ import { startOfWeek } from 'date-fns/startOfWeek';
 import { getDay } from 'date-fns/getDay';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import { toast, Toaster } from 'react-hot-toast';
-import { Modal, Box } from '@mui/material';
+import { Modal, Box, Button, Typography } from '@mui/material';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import SettingsIcon from '@mui/icons-material/Settings';
 import NoteAddIcon from '@mui/icons-material/NoteAdd';
@@ -25,6 +26,11 @@ import CustomEventComponent from '../components/CustomEventComponent';
 import LoginDialog from '../components/LoginDialog';
 import UserMenu from '../components/UserMenu';
 import unifiedSettingsService from '../services/unifiedSettingsService';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import TodoList from '../components/todo/TodoList';
+import CreateTodoModal from '../components/todo/CreateTodoModal';
+import CalendarToolbar from '../components/todo/CalendarToolbar';
+
 
 // ... 省略类型定义和辅助函数 ...
 // ... 省略主组件开头 ...
@@ -170,6 +176,12 @@ export default function CalendarPage() {
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [showSmartCreateModal, setShowSmartCreateModal] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState(false);
+  // 待办事项相关状态
+  // const [showTodoPanel, setShowTodoPanel] = useState(false); // Removed separate panel state
+  const [editingTodo, setEditingTodo] = useState<any>(null);
+  const [todoRefreshKey, setTodoRefreshKey] = useState(0);
+  const [showTodoModalOpen, setShowTodoModalOpen] = useState(false);
+
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState<boolean>(false);
   const [eventToDeleteInfo, setEventToDeleteInfo] = useState<{ id: string | number | null, title: string | null }>({ id: null, title: null });
 
@@ -181,7 +193,7 @@ export default function CalendarPage() {
 
 
   // --- Add State for Controlled View --- 
-  const [currentView, setCurrentView] = useState<View>(Views.MONTH);
+  const [currentView, setCurrentView] = useState<any>(Views.MONTH); // Allow custom views like 'todo'
   const [currentDate, setCurrentDate] = useState<Date>(new Date()); // <-- Add state for calendar date
   const [nextUpcomingEventId, setNextUpcomingEventId] = useState<string | number | null>(null); // <-- 新增 state
   const [notepadsUrl, setNotepadsUrl] = useState<string>('http://jason.cheman.top:8081/notepads/'); // 默认外网地址
@@ -226,10 +238,16 @@ export default function CalendarPage() {
       const loadEvents = async () => {
         setIsLoadingData(true); // 开始加载数据
         try {
-          const eventsRes = await authenticatedFetch(`${getApiBaseUrl()}/events`);
+          const [eventsRes, todosData] = await Promise.all([
+            authenticatedFetch(`${getApiBaseUrl()}/events`),
+            todoService.getTodos().catch(e => { console.error("Failed to fetch todos", e); return []; })
+          ]);
+
+          let validCalendarEvents: MyCalendarEvent[] = [];
+
           if (eventsRes.ok) {
             const rawEvents: RawBackendEvent[] = await eventsRes.json();
-            const calendarEvents: MyCalendarEvent[] = rawEvents
+            validCalendarEvents = rawEvents
               .map(event => ({
                 id: event.id,
                 title: event.title || '无标题事件',
@@ -249,12 +267,38 @@ export default function CalendarPage() {
                 event.end >= event.start
               )
               .map(event => event as MyCalendarEvent & { id: string | number; start: Date; end: Date });
-
-            setEvents(calendarEvents);
-            console.log("Events loaded on login.");
           } else {
             toast.error(`加载事件失败: ${eventsRes.statusText}`);
           }
+
+          // Process scheduled todos
+          if (Array.isArray(todosData)) {
+            const todoEvents = todosData
+              .filter(todo => todo.scheduled_date && todo.status !== 'completed')
+              .map(todo => {
+                const start = new Date(todo.scheduled_date!);
+                // Default duration 1 hour for display if not set
+                const end = new Date(start.getTime() + 60 * 60 * 1000);
+                return {
+                  id: `todo_${todo.id}`,
+                  title: `[待办] ${todo.title}`,
+                  start,
+                  end,
+                  allDay: false,
+                  completed: false,
+                  description: todo.description,
+                  isTodo: true,
+                  priority: todo.priority,
+                  originalTodoId: todo.id
+                } as any;
+              });
+
+            validCalendarEvents = [...validCalendarEvents, ...todoEvents];
+          }
+
+          setEvents(validCalendarEvents);
+          console.log("Events and Todos loaded.");
+
         } catch (error: unknown) {
           console.error("加载事件时出错:", error);
           toast.error(`事件加载失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -269,7 +313,7 @@ export default function CalendarPage() {
       setIsLoadingData(false);
     }
 
-  }, [isLoggedIn]); // 只依赖于登录状态
+  }, [isLoggedIn, todoRefreshKey]); // Refresh when login or todos change
 
   // --- 新增：计算下一个即将发生的事件（优化版本） ---
   const nextUpcomingEvent = useMemo(() => {
@@ -496,14 +540,26 @@ export default function CalendarPage() {
         location?: string;
       }
       const parsedData: ExtendedParsedEventData = await parseResponse.json();
-
       if (!parsedData.start_datetime) {
-        toast.error('无法从文本中解析出有效的日期和时间。', { id: toastId });
-        setIsParsing(false);
+        toast.loading('正在创建待办事项...', { id: toastId });
+        try {
+          await todoService.createTodo({
+            title: parsedData.title || naturalLanguageInput,
+            description: parsedData.description || naturalLanguageInput,
+            priority: 'medium',
+          });
+          toast.dismiss(toastId);
+          toast.success('已创建为待办事项！', { id: toastId });
+          if (typeof handleTodoSuccess === 'function') {
+            handleTodoSuccess();
+          }
+        } catch (error) {
+          toast.error(`创建待办事项失败: ${error instanceof Error ? error.message : '未知错误'}`, { id: toastId });
+        } finally {
+          setIsParsing(false);
+        }
         return;
       }
-
-      // 将解析的数据转换为事件格式
       const parsedEvent: MyCalendarEvent = {
         title: parsedData.title || '未命名事件',
         start: new Date(parsedData.start_datetime),
@@ -603,7 +659,7 @@ export default function CalendarPage() {
    * Callback function for when the view changes
    * Update the controlled view state
    */
-  const handleViewChange = useCallback((view: View) => {
+  const handleViewChange = useCallback((view: any) => { // Type as any to support 'todo'
     console.log("Calendar view *requested* to change to:", view);
     setCurrentView(view); // Update our state
     // It's good practice to also reset the date focus when changing views, 
@@ -963,6 +1019,28 @@ export default function CalendarPage() {
     toast.success('已成功注销');
   };
 
+  // 待办事项相关函数
+  // const toggleTodoPanel = () => { ... } // Removed
+
+  const handleTodoSuccess = () => {
+    setTodoRefreshKey(prev => prev + 1);
+  };
+
+  const handleCreateTodo = () => {
+    setEditingTodo(null);
+    setShowTodoModalOpen(true);
+  };
+
+  const handleEditTodo = (todo: any) => {
+    setEditingTodo(todo);
+    setShowTodoModalOpen(true);
+  };
+
+  const handleCloseTodoModal = () => {
+    setShowTodoModalOpen(false);
+    setEditingTodo(null);
+  };
+
   /**
    * 修改：处理删除事件 - 只打开确认模态框
    * @param {string | number} eventId - 要删除的事件 ID
@@ -1082,6 +1160,35 @@ export default function CalendarPage() {
   // Calendar视图配置优化（已移除，直接在组件中使用数组形式）
 
   // Calendar组件优化包装器 - 冻结更新但保持显示
+
+  // Define custom Todo View component for RBC
+  const TodoViewComponent = useMemo(() => {
+    // Inner component definition
+    const Component = (props: any) => {
+      return (
+        <div className="h-full overflow-auto bg-white p-4">
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="h6">待办事项列表</Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              size="small"
+              onClick={handleCreateTodo}
+              startIcon={<NoteAddIcon />}
+            >
+              新建待办
+            </Button>
+          </Box>
+          <TodoList onEditTodo={handleEditTodo} onRefreshNeeded={handleTodoSuccess} />
+        </div>
+      );
+    }
+    // Static properties required by RBC
+    Component.navigate = (date: Date) => date;
+    Component.title = () => '待办事项';
+    return Component;
+  }, [handleEditTodo, handleCreateTodo, handleTodoSuccess]);
+
   const CalendarComponent = useMemo(() => {
     return (
       <DnDCalendar
@@ -1099,7 +1206,14 @@ export default function CalendarPage() {
         onEventDrop={handleEventDrop as (args: { event: RbcEvent, start: string | Date, end: string | Date, isAllDay?: boolean | undefined }) => void}
         onEventResize={handleEventResize as (args: { event: RbcEvent, start: string | Date, end: string | Date }) => void}
         resizable
-        views={[Views.MONTH, Views.WEEK, Views.DAY, Views.AGENDA]}
+        // Updated views prop to include custom 'todo' view
+        views={{
+          month: true,
+          week: true,
+          day: true,
+          agenda: true,
+          todo: TodoViewComponent
+        } as any}
         view={currentView}
         onView={handleViewChange}
         date={currentDate}
@@ -1114,11 +1228,17 @@ export default function CalendarPage() {
               onDelete={handleDeleteEvent}
               nextUpcomingEventId={nextUpcomingEventId}
             />
-          )
+          ),
+          toolbar: (toolbarProps: any) => (
+            <CalendarToolbar
+              {...toolbarProps}
+            // Removed deprecated todo panel props
+            />
+          ),
         }}
       />
     );
-  }, [events, currentView, currentDate, nextUpcomingEventId, handleViewChange, handleNavigate]); // 包含必要的依赖以确保功能正常
+  }, [events, currentView, currentDate, nextUpcomingEventId, handleViewChange, handleNavigate, TodoViewComponent]); // Removed showTodoPanel dependencies
 
   // 渲染页面组件
   return (
@@ -1204,7 +1324,6 @@ export default function CalendarPage() {
                 <SettingsIcon sx={{ fontSize: '1rem' }} />
                 <span>设置</span>
               </button>
-
               {/* 用户菜单 */}
               {isLoggedIn && currentUser && (
                 <UserMenu
@@ -1233,12 +1352,15 @@ export default function CalendarPage() {
           <div className="text-center py-10">加载数据中...</div>
         ) : (
           <>
+            {/* Removed separate Todo Panel rendering */}
             <div className="bg-white rounded-lg shadow h-[calc(100vh-60px)]">
               {CalendarComponent}
             </div>
           </>
         )}
       </main>
+
+
 
       {/* 创建事件模态框 */}
       {showCreateModal && (
@@ -1340,6 +1462,14 @@ export default function CalendarPage() {
         />
       )}
 
+
+      {/* 创建/编辑待办事项模态框 */}
+      <CreateTodoModal
+        open={showTodoModalOpen}
+        onClose={handleCloseTodoModal}
+        onSuccess={handleTodoSuccess}
+        editTodo={editingTodo}
+      />
 
       {/* 登录对话框 */}
       <LoginDialog

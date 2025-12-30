@@ -773,3 +773,213 @@ module.exports = {
     ensureUserDataDir,
     getUserFilePath
 };
+// ============== 待办事项存储功能 ==============
+
+function getUserTodosFilePath(userId) {
+    try {
+        ensureDataDir();
+        const username = getUsernameFromId(userId);
+        return path.join(USERS_DATA_DIR, `${username}_todos.json`);
+    } catch (error) {
+        console.error(`[Storage] 获取用户待办事项文件路径失败:`, error);
+        return path.join(USERS_DATA_DIR, `${userId}_todos.json`);
+    }
+}
+
+function loadTodos(userId) {
+    const defaultTodos = [];
+    const filePath = getUserTodosFilePath(userId);
+
+    if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(data);
+    } else {
+        console.log(`[Storage] 待办事项文件不存在，创建默认文件: ${filePath}`);
+        fs.writeFileSync(filePath, JSON.stringify(defaultTodos, null, 2), 'utf8');
+        return defaultTodos;
+    }
+}
+
+function saveTodos(todos, userId) {
+    const filePath = getUserTodosFilePath(userId);
+    saveJsonFile(filePath, todos);
+}
+
+function getTodo(userId, todoId) {
+    const todos = loadTodos(userId);
+    return todos.find(todo => todo.id === todoId) || null;
+}
+
+function addTodo(userId, todoData) {
+    const todos = loadTodos(userId);
+
+    const newTodo = {
+        id: uuidv4(),
+        title: todoData.title || '',
+        description: todoData.description || '',
+        status: todoData.status || 'pending',
+        priority: todoData.priority || 'medium',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        source_email_id: todoData.source_email_id || null,
+        scheduled_date: todoData.scheduled_date || null,
+        completed_at: null,
+        tags: todoData.tags || []
+    };
+
+    todos.push(newTodo);
+    saveTodos(todos, userId);
+
+    console.log(`[Storage] 待办事项已添加: ${newTodo.id} - ${newTodo.title}`);
+    return newTodo;
+}
+
+function updateTodo(userId, todoId, updates) {
+    const todos = loadTodos(userId);
+    const index = todos.findIndex(todo => todo.id === todoId);
+
+    if (index === -1) {
+        console.warn(`[Storage] 待办事项不存在: ${todoId}`);
+        return null;
+    }
+
+    const updatedTodo = {
+        ...todos[index],
+        ...updates,
+        id: todoId,
+        updated_at: new Date().toISOString()
+    };
+
+    if (updates.status === 'completed' && !todos[index].completed_at) {
+        updatedTodo.completed_at = new Date().toISOString();
+    }
+
+    todos[index] = updatedTodo;
+    saveTodos(todos, userId);
+
+    console.log(`[Storage] 待办事项已更新: ${todoId}`);
+    return updatedTodo;
+}
+
+function deleteTodo(userId, todoId) {
+    const todos = loadTodos(userId);
+    const initialLength = todos.length;
+    const filteredTodos = todos.filter(todo => todo.id !== todoId);
+
+    if (filteredTodos.length === initialLength) {
+        console.warn(`[Storage] 待办事项不存在: ${todoId}`);
+        return false;
+    }
+
+    saveTodos(filteredTodos, userId);
+    console.log(`[Storage] 待办事项已删除: ${todoId}`);
+    return true;
+}
+
+function convertTodoToEvent(userId, todoId) {
+    const todo = getTodo(userId, todoId);
+
+    if (!todo) {
+        console.warn(`[Storage] 待办事项不存在，无法转换: ${todoId}`);
+        return null;
+    }
+
+    if (!todo.scheduled_date) {
+        console.warn(`[Storage] 待办事项没有设置日期，无法转换: ${todoId}`);
+        return null;
+    }
+
+    const events = loadEvents(userId);
+
+    const newEvent = {
+        id: uuidv4(),
+        title: todo.title,
+        description: todo.description + '\n\n[从待办事项转换而来]',
+        start_datetime: todo.scheduled_date,
+        end_datetime: todo.scheduled_date,
+        all_day: false,
+        created_at: new Date().toISOString(),
+        source: 'todo_convert',
+        source_todo_id: todo.id
+    };
+
+    events.push(newEvent);
+    saveEvents(events, userId);
+
+    console.log(`[Storage] 待办事项已转换为日程: ${todoId} -> ${newEvent.id}`);
+    return newEvent;
+}
+
+function addTodosFromImap(userId, todoItems) {
+    const addedTodos = [];
+
+    for (const item of todoItems) {
+        const newTodo = addTodo(userId, {
+            title: item.title || '无标题待办',
+            description: item.description || '',
+            source_email_id: item.email_uid || null,
+            priority: item.priority || 'medium'
+        });
+        addedTodos.push(newTodo);
+    }
+
+    console.log(`[Storage] 从IMAP导入 ${addedTodos.length} 个待办事项`);
+    return addedTodos;
+}
+
+function getTodoStats(userId) {
+    const todos = loadTodos(userId);
+
+    const stats = {
+        total: todos.length,
+        pending: 0,
+        in_progress: 0,
+        completed: 0,
+        high_priority: 0,
+        medium_priority: 0,
+        low_priority: 0,
+        without_date: 0,
+        with_date: 0
+    };
+
+    for (const todo of todos) {
+        switch (todo.status) {
+            case 'pending': stats.pending++; break;
+            case 'in_progress': stats.in_progress++; break;
+            case 'completed': stats.completed++; break;
+        }
+
+        switch (todo.priority) {
+            case 'high': stats.high_priority++; break;
+            case 'medium': stats.medium_priority++; break;
+            case 'low': stats.low_priority++; break;
+        }
+
+        if (todo.scheduled_date) {
+            stats.with_date++;
+        } else {
+            stats.without_date++;
+        }
+    }
+
+    return stats;
+}
+
+module.exports = {
+    loadLLMSettings, saveLLMSettings,
+    loadEvents, saveEvents,
+    loadImapSettings, saveImapSettings,
+    loadCalDAVSettings, saveCalDAVSettings,
+    loadImapFilterSettings, saveImapFilterSettings,
+    migrateGlobalEventsToUser,
+    migrateGlobalSettingsToUser,
+    cleanupMigratedEvents,
+    uuidv4,
+    ensureUserDataDir,
+    getUserFilePath,
+    loadTodos, saveTodos,
+    getTodo, addTodo, updateTodo, deleteTodo,
+    convertTodoToEvent,
+    addTodosFromImap,
+    getTodoStats
+};

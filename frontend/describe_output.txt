@@ -1,0 +1,44 @@
+[1m[7m Describing process with id 1 - name tidelog-frontend [27m[22m
+┌───────────────────┬──────────────────────────────────────────────┐
+│ status            │ [31m[1mstopped[22m[39m                                      │
+│ name              │ tidelog-frontend                             │
+│ namespace         │ default                                      │
+│ version           │ N/A                                          │
+│ restarts          │ 53                                           │
+│ uptime            │ 0                                            │
+│ script path       │ /usr/bin/npm                                 │
+│ script args       │ start                                        │
+│ error log path    │ /root/.pm2/logs/tidelog-frontend-error-1.log │
+│ out log path      │ /root/.pm2/logs/tidelog-frontend-out-1.log   │
+│ pid path          │ /root/.pm2/pids/tidelog-frontend-1.pid       │
+│ interpreter       │ /usr/bin/node                                │
+│ interpreter args  │ N/A                                          │
+│ script id         │ 1                                            │
+│ exec cwd          │ /home/jason/code/TideLog/frontend            │
+│ exec mode         │ cluster_mode                                 │
+│ node.js version   │ 24.11.1                                      │
+│ node env          │ production                                   │
+│ watch & reload    │ ✘                                            │
+│ unstable restarts │ 0                                            │
+│ created at        │ 2025-12-29T12:22:59.926Z                     │
+└───────────────────┴──────────────────────────────────────────────┘
+[7m[1m Divergent env variables from local env [22m[27m
+┌─────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ TERM_PROGRAM_VERSION    │ 1.104.3                                                                                                                                                                                                                                          │
+│ VSCODE_GIT_ASKPASS_NODE │ /root/.trae-cn-server/bin/stable-9492afc8520298f9b57a7a1813738006bd196e06-debian10/node                                                                                                                                                          │
+│ GIT_ASKPASS             │ /root/.trae-cn-server/bin/stable-9492afc8520298f9b57a7a1813738006bd196e06-debian10/extensions/git/dist/askpass.sh                                                                                                                                │
+│ SSH_CONNECTION          │ 156.233.228.53 49174 10.0.9.2 22                                                                                                                                                                                                                 │
+│ VSCODE_GIT_IPC_HANDLE   │ /run/user/0/vscode-git-4cdc883ea2.sock                                                                                                                                                                                                           │
+│ SHLVL                   │ 2                                                                                                                                                                                                                                                │
+│ XDG_SESSION_ID          │ 132                                                                                                                                                                                                                                              │
+│ SSH_CLIENT              │ 156.233.228.53 49174 22                                                                                                                                                                                                                          │
+│ VSCODE_GIT_ASKPASS_MAIN │ /root/.trae-cn-server/bin/stable-9492afc8520298f9b57a7a1813738006bd196e06-debian10/extensions/git/dist/askpass-main.js                                                                                                                           │
+│ BROWSER                 │ /root/.trae-cn-server/bin/stable-9492afc8520298f9b57a7a1813738006bd196e06-debian10/bin/helpers/browser.sh                                                                                                                                        │
+│ PATH                    │ \root/.trae-cn-server/sdks/workspaces/d9019577/versions/node/current:\root/.trae-cn-server/sdks/versions/node/current:\root/.trae-cn-server/sdks/workspaces/d9019577/versions/node/current:\root/.trae-cn-server/sdks/versions/node/current:/roo │
+│ VSCODE_IPC_HOOK_CLI     │ /run/user/0/vscode-ipc-82725c60-6563-4547-a5f6-a1b81c2e71db.sock                                                                                                                                                                                 │
+└─────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+[37m[3m Add your own code metrics: http://bit.ly/code-metrics[23m[39m
+[37m[3m Use `pm2 logs tidelog-frontend [--lines 1000]` to display logs[23m[39m
+[37m[3m Use `pm2 env 1` to display environment variables[23m[39m
+[37m[3m Use `pm2 monit` to monitor CPU and Memory usage[23m[39m tidelog-frontend
