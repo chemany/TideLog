@@ -228,7 +228,7 @@ class NewSettingsService {
     getDefaultModels() {
         const fs = require('fs');
         const path = require('path');
-        const defaultModelsPath = '/home/jason/code/unified-settings-service/config/default-models.json';
+        const defaultModelsPath = '/root/code/unified-settings-service/config/default-models.json';
 
         try {
             if (fs.existsSync(defaultModelsPath)) {
